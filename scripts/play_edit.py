@@ -376,7 +376,7 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
-    args.kit = args.kit or args.kit_pos or "./play-store-kit"
+    args.kit = str(pathlib.Path(args.kit or args.kit_pos or "./play-store-kit").resolve())
     try:
         if args.cmd == "show":
             print(json.dumps(show(args.kit), indent=2))
@@ -411,4 +411,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

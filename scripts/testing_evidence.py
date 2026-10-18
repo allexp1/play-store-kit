@@ -170,7 +170,7 @@ def main(argv=None):
     d.add_argument("--source", choices=("console", "attested"), default="console")
     args = ap.parse_args(argv)
 
-    kit = pathlib.Path(args.kit)
+    kit = pathlib.Path(args.kit).resolve()
     if args.cmd == "status":
         st = status(kit, _date(args.today) if args.today else dt.date.today())
         print(json.dumps(st, indent=2, default=str) if args.json else render(st))
@@ -201,4 +201,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

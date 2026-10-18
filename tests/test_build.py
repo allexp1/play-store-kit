@@ -140,3 +140,86 @@ def test_bump_flutter_and_expo(tmp_path):
 def test_bundle_dry_run_runs_nothing(tmp_path):
     kit, _ = kit_with(tmp_path, {"kind": "gradle"})
     assert build.bundle(kit, dry_run=True)["dry_run"] is True
+
+
+# ---------------------------------------------------------------- 1.0.1 fixes
+def test_absolute_output_glob_is_matched_and_normalised(tmp_path):
+    out = tmp_path / "cache" / "app" / "outputs" / "bundle" / "release"
+    out.mkdir(parents=True)
+    aab = out / "app-release.aab"
+    aab.write_bytes(b"1")
+    kit, root = kit_with(tmp_path / "p", {"kind": "gradle", "output_glob": str(out) + "/*.aab"})
+    plan = build.adapter_plan(kit)
+    assert build.select_output(plan["root"], plan["output_glob"]) == aab.resolve()
+    # a relative glob that climbs out of root comes back without `..`
+    rel = os.path.relpath(out, root) + "/*.aab"
+    got = build.select_output(root, rel)
+    assert got == aab.resolve() and ".." not in str(got)
+    with pytest.raises(build.BuildError):
+        build.select_output(root, str(tmp_path / "nowhere" / "*.aab"))
+
+
+def _gradle_kit(tmp_path, build_gradle):
+    kit, root = kit_with(tmp_path, {"kind": "gradle", "build_command": "true", "java_home": None})
+    (root / "app").mkdir()
+    (root / "app" / "build.gradle.kts").write_text(build_gradle)
+    return kit, root
+
+
+def test_moved_build_dir_is_named_in_the_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "pick_jdk", lambda proj: {"java_home": None, "version": 17, "source": "test"})
+    kit, root = _gradle_kit(tmp_path, 'layout.buildDirectory = file("${System.getProperty("user.home")}/.cache/x")\n')
+    with pytest.raises(build.BuildError) as e:
+        build.bundle(kit)
+    msg = str(e.value)
+    assert "build succeeded but no AAB" in msg and "layout.buildDirectory" in msg and "output_glob" in msg
+
+
+def test_moved_build_dir_found_through_gradle(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "pick_jdk", lambda proj: {"java_home": None, "version": 17, "source": "test"})
+    moved = tmp_path / "cache" / "app"
+    (moved / "outputs/bundle/release").mkdir(parents=True)
+    (moved / "outputs/bundle/release/app-release.aab").write_bytes(b"1")
+    kit, root = _gradle_kit(tmp_path / "p", 'layout.buildDirectory.set(file("/elsewhere"))\n')
+    monkeypatch.setattr(build, "gradle_build_dir", lambda root, module, env=None: moved)
+    out = build.bundle(kit)
+    assert out["artifact"] == str((moved / "outputs/bundle/release/app-release.aab").resolve())
+    assert "set output_glob" in out["note"].lower()
+
+
+def test_no_moved_build_dir_plain_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(build, "pick_jdk", lambda proj: {"java_home": None, "version": 17, "source": "test"})
+    kit, _ = _gradle_kit(tmp_path, "android { }\n")
+    with pytest.raises(build.BuildError) as e:
+        build.bundle(kit)
+    assert "build succeeded but no AAB" in str(e.value) and "moves the build directory" not in str(e.value)
+
+
+def test_pick_jdk_skips_old_java(tmp_path):
+    versions = {"/jre8": 8, "/jdk21": 21, build.STUDIO_JBR: 21, None: 8}
+    probe = versions.get
+    got = build.pick_jdk({}, env={"JAVA_HOME": "/jre8"}, probe=probe, macos=lambda: None)
+    assert got == {"java_home": build.STUDIO_JBR, "version": 21, "source": "Android Studio JBR"}
+    got = build.pick_jdk({}, env={}, probe=probe, macos=lambda: "/jdk21")
+    assert got["source"] == "/usr/libexec/java_home" and got["java_home"] == "/jdk21"
+    assert build.pick_jdk({"java_home": "/jdk21"}, env={}, probe=probe)["source"] == "project.yaml java_home"
+    with pytest.raises(build.BuildError):
+        build.pick_jdk({"java_home": "/jre8"}, env={}, probe=probe)
+    with pytest.raises(build.BuildError) as e:
+        build.pick_jdk({}, env={}, probe=lambda h: 8, macos=lambda: None)
+    assert "java_home" in str(e.value)
+
+
+def test_inspect_cli_reads_symbol_paths_from_project_yaml(tmp_path, rsa_pem, monkeypatch, capsys):
+    kit, root = kit_with(tmp_path, {"kind": "gradle", "mapping_path": "app/build/mapping.txt",
+                                    "native_symbols_path": "/abs/symbols.zip"})
+    (root / "app/build").mkdir(parents=True)
+    (root / "app/build/mapping.txt").write_text("# map")
+    aab = tmp_path / "app.aab"
+    make_aab(aab, rsa_pem[0])
+    monkeypatch.setattr(build, "Bundletool", lambda: StubBundletool(manifest()))
+    assert build.main(["inspect", "--aab", str(aab), "--kit", str(kit)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["mapping_path"] == str((root / "app/build/mapping.txt").resolve())
+    assert out["native_symbols_path"] == "/abs/symbols.zip"
+    assert any("does not exist yet" in n for n in out["notes"])

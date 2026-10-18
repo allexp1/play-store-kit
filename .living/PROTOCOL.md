@@ -26,9 +26,11 @@ never edited; delete `.living/` and the skill is exactly what its author shipped
 
 ## Refresh Protocol
 
-1. Run `python3 ../scripts/snapshot_rules.py check`. It re-fetches every Apple
-   source in `scripts/rules.json` and names the pages whose text changed.
-   Read (WebFetch) every CHANGED page, plus each entry of sources.md.
+1. Run `python3 ../scripts/rules.py check --online` (with the skill's venv
+   Python if PyYAML is not installed). It re-fetches every Google source in
+   `scripts/rules.json` and reports the pages whose content changed (advisory,
+   it never rewrites a value). Read (WebFetch) every CHANGED page, plus each
+   entry of sources.md.
 2. PRIMARY-source findings: apply directly. SECONDARY-source findings: apply
    only if corroborated by a PRIMARY source; otherwise log in CHANGELOG.md as
    "UNCONFIRMED, monitoring".
@@ -39,5 +41,6 @@ never edited; delete `.living/` and the skill is exactly what its author shipped
 6. Writes are allowed ONLY inside `.living/`, and only to KNOWLEDGE.md and
    CHANGELOG.md. Never SKILL.md, never sources.md, never this file, never
    `scripts/rules.json`. If a rule number changed, tell the user and offer the
-   exact edit to `scripts/rules.json` (and the kit's frozen `rules.json`).
+   exact edit to `scripts/rules.src.yaml`, then `python3 scripts/rules.py freeze`
+   rebuilds `scripts/rules.json`.
 7. Summarize what changed in 2-3 lines before proceeding with the user's task.

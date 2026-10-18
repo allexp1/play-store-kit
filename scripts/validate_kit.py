@@ -3,6 +3,7 @@
 
   python3 scripts/validate_kit.py KIT [--only schemas|secrets] [--json]
   python3 scripts/validate_kit.py KIT --init            # copy templates/kit into KIT (never overwrites)
+                                                        # and add the kit's lines to the nearest .gitignore
 
 Errors exit 1, warnings alone exit 0. Nothing here touches the network or the Play account.
 
@@ -28,6 +29,8 @@ import build
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TEMPLATES = ROOT / "templates" / "kit"
+GITIGNORE_SNIPPET = ROOT / "templates" / "gitignore.snippet"
+CREDENTIALS_EXAMPLE = ROOT / "templates" / "credentials.example.yaml"
 
 PACKAGE_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$")
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{2}(:?[0-9a-fA-F]{2}){31}$")
@@ -285,6 +288,7 @@ def _git(kit, *args):
 
 
 def check_secrets(kit, rep):
+    kit = pathlib.Path(kit).resolve()
     top = _git(kit, "rev-parse", "--show-toplevel")
     if top:
         top = pathlib.Path(top.strip())
@@ -295,7 +299,8 @@ def check_secrets(kit, rep):
                 rep.error("git", f"{rel} is tracked by git: run `git rm --cached {rel}` and keep it in .gitignore")
         private = kit / "private"
         if private.exists() and _git(kit, "check-ignore", "-q", str(private / "x")) is None:
-            rep.error("git", f"{private} is not ignored: add the lines in templates/kit/gitignore.snippet")
+            rep.error("git", f"{private} is not ignored: run `validate_kit.py {kit} --init` "
+                             "(it adds the lines to the nearest .gitignore)")
     creds = kit / "private" / "credentials.yaml"
     if creds.exists():
         c = build.load_yaml(creds) or {}
@@ -316,22 +321,72 @@ def check_secrets(kit, rep):
 
 # ------------------------------------------------------------------------------------------------ init
 def init(kit: pathlib.Path) -> list[str]:
+    """Copy templates/kit into KIT (never overwrites) and the credentials example into KIT/private/."""
+    kit = pathlib.Path(kit).resolve()
     written = []
-    for src in sorted(TEMPLATES.rglob("*")):
-        if src.is_dir() or src.name == "gitignore.snippet":
-            continue
-        rel = src.relative_to(TEMPLATES)
-        dest = kit / ("private/credentials.yaml" if rel.name == "credentials.example.yaml" else rel)
+    pairs = [(src, kit / src.relative_to(TEMPLATES)) for src in sorted(TEMPLATES.rglob("*")) if src.is_file()]
+    pairs.append((CREDENTIALS_EXAMPLE, kit / "private" / "credentials.yaml"))
+    for src, dest in pairs:
         if dest.exists():
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dest)
         written.append(str(dest.relative_to(kit)))
+    # A kit copied by hand from an older template may carry these two in its root; they do not belong there.
+    for name, src in (("gitignore.snippet", GITIGNORE_SNIPPET), ("credentials.example.yaml", CREDENTIALS_EXAMPLE)):
+        stray = kit / name
+        if stray.is_file() and stray.read_bytes() == src.read_bytes():
+            stray.unlink()
+            written.append(f"removed {name} (template file, not part of a kit)")
     return written
 
 
+def gitignore_lines(kit: pathlib.Path, gitignore: pathlib.Path) -> list[str]:
+    """The snippet with the kit folder written relative to the .gitignore that will hold it."""
+    rel = os.path.relpath(pathlib.Path(kit).resolve(), pathlib.Path(gitignore).resolve().parent).replace(os.sep, "/")
+    lines = []
+    for line in GITIGNORE_SNIPPET.read_text(encoding="utf-8").splitlines():
+        if line.startswith("play-store-kit/"):
+            line = rel + line[len("play-store-kit"):]
+        lines.append(line)
+    return lines
+
+
+def nearest_gitignore(kit: pathlib.Path):
+    """(path of the nearest existing .gitignore above KIT within its git repo, else the repo root's; None outside git)."""
+    kit = pathlib.Path(kit).resolve()
+    top = _git(kit, "rev-parse", "--show-toplevel")
+    if not top:
+        return None
+    top = pathlib.Path(top.strip()).resolve()
+    for d in [kit.parent, *kit.parent.parents]:
+        if (d / ".gitignore").is_file():
+            return d / ".gitignore"
+        if d == top:
+            break
+    return top / ".gitignore"
+
+
+def add_gitignore(kit: pathlib.Path) -> dict:
+    """Append the missing kit lines to the nearest .gitignore. Outside git: nothing written, lines returned."""
+    kit = pathlib.Path(kit).resolve()
+    target = nearest_gitignore(kit)
+    if target is None:
+        target = kit.parent / ".gitignore"
+        return {"path": str(target), "written": False, "lines": gitignore_lines(kit, target),
+                "note": "not a git repository: add these lines yourself once it is one"}
+    lines = gitignore_lines(kit, target)
+    have = set(target.read_text(encoding="utf-8").splitlines()) if target.exists() else set()
+    add = [l for l in lines if l and not l.startswith("#") and l not in have]
+    if add:
+        old = target.read_text(encoding="utf-8") if target.exists() else ""
+        sep = "" if not old or old.endswith("\n") else "\n"
+        target.write_text(old + sep + "\n".join([lines[0]] + add) + "\n", encoding="utf-8")
+    return {"path": str(target), "written": bool(add), "lines": add}
+
+
 def validate(kit, only=None) -> Report:
-    kit = pathlib.Path(kit)
+    kit = pathlib.Path(kit).resolve()   # git runs with cwd=kit, so relative paths would point elsewhere
     rep = Report()
     if only in (None, "schemas"):
         check_schemas(kit, rep)
@@ -347,12 +402,19 @@ def main(argv=None):
     ap.add_argument("--init", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    kit = pathlib.Path(a.kit)
+    kit = pathlib.Path(a.kit).resolve()
     if a.init:
         kit.mkdir(parents=True, exist_ok=True)
         written = init(kit)
-        print("\n".join(f"wrote {w}" for w in written) or "nothing to write (files already exist)")
-        print("add to .gitignore:\n" + (TEMPLATES / "gitignore.snippet").read_text())
+        print("\n".join(w if w.startswith("removed ") else f"wrote {w}" for w in written)
+              or "nothing to write (files already exist)")
+        gi = add_gitignore(kit)
+        if gi["written"]:
+            print(f"added to {gi['path']}:\n  " + "\n  ".join(gi["lines"]))
+        elif gi.get("note"):
+            print(f"{gi['note']}. Lines for {gi['path']}:\n  " + "\n  ".join(gi["lines"]))
+        else:
+            print(f"{gi['path']} already ignores the kit's private files")
         return 0
     rep = validate(kit, a.only)
     if a.json:
@@ -365,4 +427,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

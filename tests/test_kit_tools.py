@@ -120,7 +120,7 @@ def test_tracked_keystore_and_unignored_private_fail(kit):
     _git(repo, "add", "-f", "upload.jks")
     errs = " ".join(_errors(kit, "secrets"))
     assert "upload.jks is tracked" in errs and "is not ignored" in errs
-    (repo / ".gitignore").write_text((validate_kit.TEMPLATES / "gitignore.snippet").read_text())
+    (repo / ".gitignore").write_text(validate_kit.GITIGNORE_SNIPPET.read_text())
     _git(repo, "rm", "-q", "--cached", "upload.jks")
     assert _errors(kit, "secrets") == []
 
@@ -128,7 +128,7 @@ def test_tracked_keystore_and_unignored_private_fail(kit):
 def test_key_inside_repo_fails(kit):
     repo = kit.parent
     _git(repo, "init", "-q")
-    (repo / ".gitignore").write_text((validate_kit.TEMPLATES / "gitignore.snippet").read_text())
+    (repo / ".gitignore").write_text(validate_kit.GITIGNORE_SNIPPET.read_text())
     key = repo / "keys" / "play.json"
     key.parent.mkdir()
     key.write_text("{}")
@@ -285,3 +285,50 @@ def test_board_refuses_to_write_secrets(kit, monkeypatch):
     with pytest.raises(ValueError):
         status_board.main([str(kit), "--today", "2026-10-18"])
     assert not (kit / "STATUS.md").exists()
+
+
+# ------------------------------------------------------------------------------------------------ 1.0.1 fixes
+def test_relative_kit_path_checks_the_right_private(kit, monkeypatch):
+    repo = kit.parent
+    _git(repo, "init", "-q")
+    (repo / ".gitignore").write_text(validate_kit.GITIGNORE_SNIPPET.read_text())
+    monkeypatch.chdir(repo)
+    assert _errors(pathlib.Path("play-store-kit"), "secrets") == []
+    assert validate_kit.main(["play-store-kit", "--only", "secrets"]) == 0
+
+
+def test_init_adds_gitignore_lines_and_keeps_templates_out(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    (repo / "android").mkdir(parents=True)
+    _git(repo, "init", "-q")
+    (repo / ".gitignore").write_text("build/")              # no trailing newline
+    kit = repo / "android" / "play-store-kit"
+    kit.mkdir()
+    (kit / "gitignore.snippet").write_text(validate_kit.GITIGNORE_SNIPPET.read_text())   # a hand copy
+    assert validate_kit.main([str(kit), "--init"]) == 0
+    text = (repo / ".gitignore").read_text()
+    assert text.startswith("build/\n") and "android/play-store-kit/private/" in text
+    assert not (kit / "gitignore.snippet").exists() and not (kit / "credentials.example.yaml").exists()
+    assert (kit / "private" / "credentials.yaml").exists()
+    assert _errors(kit, "secrets") == []
+    validate_kit.main([str(kit), "--init"])                   # second run adds nothing
+    assert (repo / ".gitignore").read_text() == text
+    assert "already ignores" in capsys.readouterr().out
+
+
+def test_init_outside_git_prints_lines(tmp_path, capsys):
+    kit = tmp_path / "plain" / "play-store-kit"
+    validate_kit.main([str(kit), "--init"])
+    out = capsys.readouterr().out
+    assert "not a git repository" in out and "play-store-kit/private/" in out
+    assert not (tmp_path / "plain" / ".gitignore").exists()
+
+
+def test_board_shows_extension_ends_only_when_recorded(kit):
+    labels = [r[2] for r in status_board.deadline_rows(_board(kit))]
+    assert "Target API extension ends" not in labels and "Billing Library extension ends" not in labels
+    assert "Billing Library 9 required" in labels
+    _set(kit / "policy-extensions.yaml", extensions=[{"kind": "billing_library", "until": "2026-11-01",
+                                                      "observed_at": "2026-10-18", "source": "console"}])
+    labels = [r[2] for r in status_board.deadline_rows(_board(kit))]
+    assert "Billing Library extension ends" in labels and "Target API extension ends" not in labels

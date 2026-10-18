@@ -148,7 +148,7 @@ say(dryRun ? `
   Dry run. Nothing was written.
 ` : `
   Done. Restart Claude Code, then say "publish my app on Google Play", "ship an update" or "start a staged rollout".
-  The scripts need Python 3.12 with PyYAML and cryptography:  python3 -m pip install -r ${path.join(dest, 'requirements.txt')}
+  The scripts need PyYAML and cryptography. Once:  python3 -m venv ${path.join(dest, '.venv')} && ${path.join(dest, '.venv', 'bin', 'pip')} install -r ${path.join(dest, 'requirements.txt')}
   Artifact checks need a JDK and bundletool. For the Play Developer API, create a dedicated service account once;
   the skill walks you through it.
 `);

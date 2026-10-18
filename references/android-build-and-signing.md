@@ -26,7 +26,13 @@ AAB (`bundletool dump manifest`), never from `src/main/AndroidManifest.xml`: the
 
 `build_command` in `project.yaml` overrides the default; it runs without a shell (split like a command line), in
 the project root. Output selection is restricted to the selected module and picks the newest file, then the hash is
-recorded — the kit never uploads "the first match of a glob".
+recorded — the kit never uploads "the first match of a glob". `output_glob` may be absolute (or start with `~`).
+If build.gradle moves the build directory (`layout.buildDirectory`, `buildDir`), the default glob finds nothing:
+`bundle` then asks Gradle for the module's `buildDir` and looks there, or tells you to set `output_glob`.
+
+Gradle needs JDK 17+. `bundle` uses `project.yaml → java_home`, else `JAVA_HOME` (or `java` on PATH when it is
+unset), else `/usr/libexec/java_home -v 17+`, else Android Studio's JBR, skips anything below 17, and reports the
+one it used under `jdk`.
 
 Gradle is executable configuration. `bump` edits only a plain integer it can see; a version derived from a property,
 a CI variable or a plugin gets a printed instruction instead of a regex edit.

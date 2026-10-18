@@ -78,7 +78,12 @@ def _validate(rules: list[dict]) -> list[str]:
 
 
 def build_from_src(src: pathlib.Path = SRC) -> list[dict]:
-    import yaml  # only freeze needs PyYAML; readers use rules.json
+    try:
+        import yaml  # only freeze needs PyYAML; readers use rules.json
+    except ImportError:
+        import deps
+        deps.require(("yaml",))
+        raise
 
     doc = yaml.safe_load(src.read_text(encoding="utf-8"))
     defaults = doc.get("defaults", {})

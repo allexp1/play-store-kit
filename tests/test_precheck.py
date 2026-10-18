@@ -236,3 +236,14 @@ def test_render_and_exit_codes(tmp_path, kit, rsa_pem):
     md = precheck.render(rec, f, TODAY)
     assert md.startswith("# Pre-check — com.example.app") and "B-TARGET" in md
     assert any(x.counts() for x in f)
+
+
+def test_gms_auth_from_play_services_is_not_sign_in(tmp_path, kit, rsa_pem):
+    # Play Billing pulls com/google/android/gms/auth classes in through play-services-base.
+    rec, sha = rec_for(tmp_path, rsa_pem[0], dex=b"dex\n035\0Lcom/google/android/gms/auth/api/accounttransfer/X;"
+                                             b"Lcom/google/android/gms/auth/api/signin/GoogleSignInAccount;")
+    bound_kit(kit, sha)
+    assert "W-RESTORE" not in ids(precheck.run(kit, rec, TODAY))
+    rec, sha = rec_for(tmp_path, rsa_pem[0], dex=b"dex\n035\0Lcom/google/android/gms/auth/api/signin/GoogleSignIn;")
+    bound_kit(kit, sha)
+    assert "W-RESTORE" in ids(precheck.run(kit, rec, TODAY))

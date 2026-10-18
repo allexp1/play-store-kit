@@ -530,7 +530,7 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
-    args.kit = args.kit or args.kit_pos or "./play-store-kit"
+    args.kit = str(pathlib.Path(args.kit or args.kit_pos or "./play-store-kit").resolve())
     package = args.package or _kit_package(args.kit)
     if args.dry_run:
         print(f"dry run: would {args.cmd} {package or '<package>'} on track {args.track}; no network, no auth")
@@ -565,4 +565,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

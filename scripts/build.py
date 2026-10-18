@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import glob as globmod
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -178,7 +180,9 @@ SDK_PREFIXES = (
     "Lcom/google/firebase/analytics/", "Lcom/appsflyer/", "Lcom/adjust/sdk/", "Lcom/facebook/appevents/",
     "Lcom/google/firebase/crashlytics/", "Lio/sentry/", "Lcom/amplitude/", "Lcom/mixpanel/",
     "Lcom/google/firebase/auth/", "Lcom/auth0/", "Lio/github/jan/supabase/", "Lcom/amazonaws/mobileconnectors/cognito",
-    "Lcom/google/android/gms/auth/", "Landroidx/credentials/", "Lcom/google/android/libraries/identity/googleid/",
+    "Lcom/google/android/gms/auth/api/signin/GoogleSignIn;", "Lcom/google/android/gms/auth/api/signin/GoogleSignInClient;",
+    "Lcom/google/android/gms/auth/api/identity/",
+    "Landroidx/credentials/", "Lcom/google/android/libraries/identity/googleid/",
     "Lcom/google/ai/client/generativeai/", "Lcom/google/firebase/ai/", "Lcom/google/firebase/vertexai/",
     "Lcom/openai/", "Lcom/anthropic/", "Lcom/google/mlkit/genai/", "Lcom/google/android/gms/location/",
 )
@@ -347,11 +351,161 @@ def adapter_plan(kit) -> dict:
 
 
 def select_output(root, glob) -> pathlib.Path:
-    """Newest .aab matching the glob below the selected module. Ties and stale files are reported by the caller."""
-    found = sorted(pathlib.Path(root).glob(glob), key=lambda p: p.stat().st_mtime, reverse=True)
+    """Newest .aab matching the glob below the selected module. Ties and stale files are reported by the caller.
+
+    An absolute (or ~) pattern is matched as it is; a relative one below root. The result is an absolute, normalised
+    path (no `..`)."""
+    pattern = os.path.expanduser(str(glob))
+    if os.path.isabs(pattern):
+        hits = [pathlib.Path(h) for h in globmod.glob(pattern, recursive=True)]
+    else:
+        hits = list(pathlib.Path(root).glob(pattern))
+    found = sorted((h for h in hits if h.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
     if not found:
         raise BuildError(f"no AAB matches {glob} under {root}")
-    return found[0]
+    return found[0].resolve()
+
+
+# ------------------------------------------------------------------------------------------------ JDK
+GRADLE_KINDS = ("gradle", "react-native", "expo")
+JDK_MIN = 17   # Gradle 8 and the Android Gradle Plugin 8 need JDK 17 or later
+STUDIO_JBR = "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+
+
+def java_major(home) -> int | None:
+    """Major version of HOME/bin/java (or `java` on PATH when home is None), from `java -version`."""
+    exe = str(pathlib.Path(home) / "bin" / "java") if home else shutil.which("java")
+    if not exe or not os.path.exists(exe):
+        return None
+    try:
+        p = subprocess.run([exe, "-version"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r'version "(\d+)(?:\.(\d+))?', p.stderr + p.stdout)
+    if not m:
+        return None
+    major = int(m.group(1))
+    return int(m.group(2) or 0) if major == 1 else major    # "1.8.0_x" is Java 8
+
+
+def _macos_java_home() -> str | None:
+    if not os.path.exists("/usr/libexec/java_home"):
+        return None
+    try:
+        p = subprocess.run(["/usr/libexec/java_home", "-v", f"{JDK_MIN}+"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return p.stdout.strip() or None if p.returncode == 0 else None
+
+
+def pick_jdk(proj: dict, env=None, probe=java_major, macos=_macos_java_home, studio=STUDIO_JBR) -> dict:
+    """The JDK the Gradle build runs with: {java_home, version, source}; java_home None means `java` on PATH.
+
+    Order: project.yaml java_home, JAVA_HOME, `java` on PATH (only when JAVA_HOME is unset), then
+    `/usr/libexec/java_home -v 17+` and Android Studio's bundled JBR. Anything below 17 is skipped."""
+    env = os.environ if env is None else env
+    tried = []
+    explicit = proj.get("java_home")
+    if explicit:
+        home = os.path.expanduser(str(explicit))
+        v = probe(home)
+        if v and v >= JDK_MIN:
+            return {"java_home": home, "version": v, "source": "project.yaml java_home"}
+        raise BuildError(f"project.yaml java_home {home} is {'Java ' + str(v) if v else 'not a JDK'}; "
+                         f"Gradle needs JDK {JDK_MIN} or later")
+    candidates = []
+    if env.get("JAVA_HOME"):
+        candidates.append((env["JAVA_HOME"], "JAVA_HOME"))
+    else:
+        candidates.append((None, "java on PATH"))
+    candidates += [(macos(), "/usr/libexec/java_home"), (studio, "Android Studio JBR")]
+    for home, source in candidates:
+        if source != "java on PATH" and not home:
+            continue
+        v = probe(home)
+        tried.append(f"{source}: {home or 'java'} ({'Java ' + str(v) if v else 'not found'})")
+        if v and v >= JDK_MIN:
+            return {"java_home": home, "version": v, "source": source}
+    raise BuildError(f"Gradle needs JDK {JDK_MIN} or later and none was found (" + "; ".join(tried) + "). "
+                     "Install one, or set java_home in project.yaml (Android Studio's is "
+                     f"{studio})")
+
+
+def _jdk_env(jdk: dict, env=None) -> dict:
+    env = dict(os.environ if env is None else env)
+    if jdk.get("java_home"):
+        env["JAVA_HOME"] = jdk["java_home"]
+        env["PATH"] = str(pathlib.Path(jdk["java_home"]) / "bin") + os.pathsep + env.get("PATH", "")
+    return env
+
+
+# ------------------------------------------------------------------------------------------------ moved build dir
+BUILD_DIR_RE = re.compile(r"^\s*(?!//).*\b(layout\.buildDirectory|buildDir)\b.*$", re.M)
+
+
+def moved_build_dir(root, module) -> list[str]:
+    """`file: line` for every build.gradle(.kts) line that sets the build directory (root project or module)."""
+    root = pathlib.Path(root)
+    hits = []
+    for d in (root, root / module):
+        for name in ("build.gradle.kts", "build.gradle"):
+            f = d / name
+            if f.is_file():
+                for m in BUILD_DIR_RE.finditer(f.read_text(encoding="utf-8", errors="replace")):
+                    line = m.group(0).strip()
+                    if "=" in line or ".set(" in line:
+                        hits.append(f"{f.relative_to(root)}: {line}")
+    return hits
+
+
+def gradle_build_dir(root, module, env=None) -> pathlib.Path | None:
+    """Ask Gradle where the module's build directory is (`:module:properties`). None when it cannot say."""
+    gradlew = pathlib.Path(root) / "gradlew"
+    if not gradlew.exists():
+        return None
+    try:
+        p = subprocess.run(["./gradlew", "-q", f":{module}:properties", "--property", "buildDir"], cwd=root,
+                           capture_output=True, text=True, timeout=600, env=env)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"^buildDir:\s*(\S.*)$", p.stdout, re.M)
+    return pathlib.Path(m.group(1).strip()) if p.returncode == 0 and m else None
+
+
+def find_moved_aab(plan, proj, env=None) -> dict:
+    """The build succeeded but output_glob found nothing: explain a moved build directory, or find the AAB there."""
+    module, variant = proj.get("module", "app"), proj.get("variant", "release")
+    hits = moved_build_dir(plan["root"], module)
+    where = pathlib.Path(plan["root"]) / plan["output_glob"]
+    if not hits:
+        raise BuildError(f"the build succeeded but no AAB was found at {where}. Set output_glob in project.yaml "
+                         "to the path or glob of the signed AAB")
+    build_dir = gradle_build_dir(plan["root"], module, env)
+    if build_dir:
+        pattern = str(build_dir / "outputs" / "bundle" / variant / "*.aab")
+        try:
+            aab = select_output(plan["root"], pattern)
+            return {"artifact": str(aab), "note": f"build directory is moved ({hits[0]}); found the AAB through "
+                                                  f"Gradle. Set output_glob: {pattern} in project.yaml"}
+        except BuildError:
+            pass
+    raise BuildError(f"the build succeeded but no AAB was found at {where}. build.gradle moves the build directory "
+                     f"({'; '.join(hits)}): set output_glob in project.yaml to <that directory>/outputs/bundle/"
+                     f"{variant}/*.aab (an absolute path is fine)")
+
+
+def kit_symbol_paths(kit) -> dict:
+    """mapping_path and native_symbols_path from KIT/project.yaml, absolute (relative ones are below root)."""
+    kit = pathlib.Path(kit)
+    proj = load_yaml(kit / "project.yaml") if (kit / "project.yaml").exists() else {}
+    root = (kit / proj.get("root", "..")).resolve()
+    out = {}
+    for key in ("mapping_path", "native_symbols_path"):
+        v = proj.get(key)
+        if v:
+            path = pathlib.Path(os.path.expanduser(str(v)))
+            out[key] = str(path if path.is_absolute() else (root / path).resolve())
+    return out
 
 
 def bump(kit, version_name=None, write=True) -> dict:
@@ -414,16 +568,33 @@ def _write(path, old, new, code, write):
 def bundle(kit, dry_run=False) -> dict:
     """Run the adapter's build (when it has one) and pick the newest AAB it produced."""
     plan = adapter_plan(kit)
+    proj = load_yaml(pathlib.Path(kit) / "project.yaml")
+    uses_gradle = plan["command"] and (plan["kind"] in GRADLE_KINDS or plan["command"].startswith("./gradlew"))
+    env = None
+    if uses_gradle:
+        try:
+            plan["jdk"] = pick_jdk(proj)
+        except BuildError as e:
+            if not dry_run:
+                raise
+            plan["jdk"] = {"error": str(e)}
+        if "error" not in plan["jdk"]:
+            env = _jdk_env(plan["jdk"])
     if dry_run:
         return {**plan, "dry_run": True}
     if plan["command"]:
         # build_command is one command line from the owner's project.yaml, run without a shell (no && or pipes).
-        p = subprocess.run(shlex.split(plan["command"]), cwd=plan["root"], capture_output=True, text=True)
+        p = subprocess.run(shlex.split(plan["command"]), cwd=plan["root"], capture_output=True, text=True, env=env)
         if p.returncode != 0:
             raise BuildError(f"build failed ({p.returncode}): {p.stderr.strip()[-800:]}")
     out = dict(plan)
     if plan.get("output_glob"):
-        out["artifact"] = str(select_output(plan["root"], plan["output_glob"]))
+        try:
+            out["artifact"] = str(select_output(plan["root"], plan["output_glob"]))
+        except BuildError:
+            if not plan["command"] or proj.get("output_glob"):
+                raise
+            out.update(find_moved_aab(plan, proj, env))
     return out
 
 
@@ -438,6 +609,7 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
+    args.kit = str(pathlib.Path(args.kit).resolve())
     try:
         if args.cmd == "bundle":
             print(json.dumps(bundle(args.kit, args.dry_run), indent=2))
@@ -456,7 +628,14 @@ def main(argv=None):
         elif args.cmd == "size":
             print(json.dumps(download_size(args.aab, Bundletool()), indent=2))
         else:
-            rec = inspect(args.aab, size=args.size)
+            if not args.aab:
+                raise BuildError("inspect needs --aab PATH")
+            syms = kit_symbol_paths(args.kit)
+            rec = inspect(args.aab, size=args.size, mapping=syms.get("mapping_path"),
+                          native_symbols=syms.get("native_symbols_path"))
+            for key in ("mapping_path", "native_symbols_path"):
+                if syms.get(key) and not pathlib.Path(syms[key]).exists():
+                    rec.notes.append(f"project.yaml {key} {syms[key]} does not exist yet (build first)")
             print(json.dumps(rec.to_json(), indent=2, default=list))
         return 0
     except BuildError as e:
@@ -465,4 +644,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

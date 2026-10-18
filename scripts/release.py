@@ -1031,6 +1031,7 @@ def main(argv=None, runner=None):
     add("abort", lambda p: p.add_argument("--force", action="store_true"))
     add("bump", lambda p: p.add_argument("--version-name"))
     a = ap.parse_args(argv)
+    a.kit = str(pathlib.Path(a.kit).resolve())
     try:
         if a.dry_run and a.cmd in ("import", "apply", "commit", "status", "wait", "reconcile", "abort"):
             print(f"dry run: would {a.cmd} for kit {a.kit}; no network, no auth, no writes")
@@ -1090,4 +1091,6 @@ def main(argv=None, runner=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

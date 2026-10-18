@@ -30,4 +30,4 @@ for part in "${PARTS[@]}"; do
 done
 find "$DEST" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 chmod +x "${DEST}/scripts/"*.py 2>/dev/null || true
-echo; echo "Done. Restart Claude Code. Python 3.12 with: python3 -m pip install -r ${DEST}/requirements.txt"
+echo; echo "Done. Restart Claude Code. Once: python3 -m venv ${DEST}/.venv && ${DEST}/.venv/bin/pip install -r ${DEST}/requirements.txt"

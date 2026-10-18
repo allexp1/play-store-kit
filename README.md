@@ -34,7 +34,8 @@ npx play-store-kit
 ```
 
 or from a clone: `./install.sh`. Both install into `~/.claude/skills/play-store-kit/` (`--dest DIR` for another place,
-`--dry-run` to see the plan). Needs Python 3.12+ with `pip install -r requirements.txt`, a JDK and `bundletool` for
+`--dry-run` to see the plan). Needs Python 3.12+ with the requirements in a venv (`python3 -m venv .venv &&
+.venv/bin/pip install -r requirements.txt` in the skill folder), a JDK 17+ and `bundletool` for
 artifact checks.
 
 ## Develop

@@ -37,7 +37,7 @@
       "id": "billing_library.next_deadline",
       "value": "2027-08-31",
       "unit": "date",
-      "applies_to": "v8 deprecation (WARNING); extension to 2027-11-01",
+      "applies_to": "v8 deadline for new apps and updates, so v9 or later is required (WARNING now); extension to 2027-11-01",
       "effective_from": null,
       "effective_until": null,
       "source_url": "https://developer.android.com/google/play/billing/deprecation-faq",

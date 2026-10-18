@@ -40,7 +40,11 @@ COLLECTING_SDKS = ADS_SDKS + ("Lcom/google/firebase/crashlytics/", "Lio/sentry/"
                               "Lcom/mixpanel/", "Lcom/google/android/gms/location/")
 ACCOUNT_SDKS = ("Lcom/google/firebase/auth/", "Lcom/auth0/", "Lio/github/jan/supabase/",
                 "Lcom/amazonaws/mobileconnectors/cognito")
-SIGNIN_SDKS = ACCOUNT_SDKS + ("Lcom/google/android/gms/auth/", "Landroidx/credentials/",
+# Only sign-in entry points (play-services-auth). Not gms/auth/ or GoogleSignInAccount: Play Billing pulls those in
+# through play-services-base, sign-in or not.
+SIGNIN_SDKS = ACCOUNT_SDKS + ("Lcom/google/android/gms/auth/api/signin/GoogleSignIn;",
+                              "Lcom/google/android/gms/auth/api/signin/GoogleSignInClient;",
+                              "Lcom/google/android/gms/auth/api/identity/", "Landroidx/credentials/",
                               "Lcom/google/android/libraries/identity/googleid/")
 GENAI_SDKS = ("Lcom/google/ai/client/generativeai/", "Lcom/google/firebase/ai/", "Lcom/google/firebase/vertexai/",
               "Lcom/openai/", "Lcom/anthropic/", "Lcom/google/mlkit/genai/")
@@ -557,6 +561,9 @@ def main(argv=None):
     p.add_argument("--strict", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
+    args.kit = str(pathlib.Path(args.kit).resolve())
+    if args.project:
+        args.project = str(pathlib.Path(args.project).resolve())
     today = _date(args.today) or dt.date.today()
     try:
         aab = args.aab
@@ -565,7 +572,10 @@ def main(argv=None):
                 p.error("give --aab PATH or a PROJECT directory")
             plan = build.adapter_plan(args.kit)
             aab = str(build.select_output(plan["root"], plan["output_glob"] or "**/*.aab"))
-        rec = build.inspect(aab, size=args.size, mapping=args.mapping)
+        mapping = args.mapping or build.kit_symbol_paths(args.kit).get("mapping_path")   # project.yaml fallback
+        if mapping and not args.mapping and not pathlib.Path(mapping).exists():
+            mapping = None
+        rec = build.inspect(aab, size=args.size, mapping=mapping)
     except build.BuildError as e:
         print(e, file=sys.stderr)
         return 1
@@ -581,4 +591,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

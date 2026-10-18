@@ -1,6 +1,6 @@
 {
   "name": "play-store-kit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A Claude skill that takes an Android app to Google Play and keeps it there: artifact pre-check against Play requirements, signed App Bundle upload, review, staged rollout and recovery through the official Google Play Developer API, every live effect behind its own approval.",
   "bin": {
     "play-store-kit": "bin/install.js"

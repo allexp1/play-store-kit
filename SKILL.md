@@ -1,6 +1,6 @@
 ---
 name: play-store-kit
-version: "1.0.0"
+version: "1.0.1"
 description: "Takes an Android app to Google Play and keeps it there, through the official Google Play Developer API with every live effect behind its own approval: service-account connection and capability check, bootstrap of a new app (Console first), adoption of an existing app, a code and artifact pre-check against Play requirements (target API incl. TV/XR, 16 KB ELF alignment, 64-bit, Billing Library deadline, versionCode, download size, Data safety, GenAI rules), signed App Bundle upload as a draft, send for review, edit-free status and waiting, staged rollout, halt/resume/promote, recovery after lost responses, the closed-test gate tracked from evidence, and the Play Console steps the API cannot do as a guided checklist. Use when the person says \"publish on Google Play\", \"Play Console\", \"AAB / app bundle\", \"internal / closed / open testing\", \"staged rollout\", \"target API level\", \"Data safety\", \"app rejected / removed from Play\", or wants the Android version of app-store-kit."
 ---
 
@@ -16,11 +16,15 @@ writing a Play Billing integration (the kit checks evidence, it does not write p
 
 The owner says one sentence. Work out the journey, show the status board, and go step by step.
 
+**First run:** the scripts need PyYAML and cryptography. Create a venv once in the skill folder
+(`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`) and run every script with `.venv/bin/python`.
+A script started without them prints this command and exits 1.
+
 | The owner says | Journey | Steps |
 |---|---|---|
 | "Connect my Play account" | **J0 Connect** | `console_guide.py KIT service-account` (person) → `play_api.py connect KIT` → capability matrix |
-| "Put my app on Google Play" (new app) | **J1 Bootstrap** | `build.py inspect` → `precheck.py` → `console_guide.py KIT bootstrap` → person uploads the first signed AAB in the Console → J0 → `release.py import` |
-| "Manage my existing Play app" | **J2 Adopt** | `release.py import KIT --write-kit` (read-only) → set `managed:` in `console.yaml` |
+| "Put my app on Google Play" (new app) | **J1 Bootstrap** | `validate_kit.py KIT --init` (kit files + .gitignore lines) → `build.py inspect` → `precheck.py` → `console_guide.py KIT bootstrap` → person uploads the first signed AAB in the Console → J0 → `release.py import` |
+| "Manage my existing Play app" | **J2 Adopt** | `validate_kit.py KIT --init` → `release.py import KIT --write-kit` (read-only) → set `managed:` in `console.yaml` |
 | "Ship 1.4", "upload to internal testing" | **J3 Release** | `build.py bundle` → `precheck.py` → `release.py plan` → G-UPLOAD 🛑 → `apply` → G-TEST-DIST / G-PROD-SUBMIT 🛑 → `commit` → `wait` |
 | "What's the status?", "did Google approve it?" | **J4 Status** | `release.py status KIT` (edit-free) → `status_board.py KIT` |
 | "Roll out to 20 %", "halt", "resume", "promote" | **J5 Rollout** | `release.py rollout|halt|resume|promote` → G-ROLLOUT 🛑, one transition per plan |

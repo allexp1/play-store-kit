@@ -245,7 +245,7 @@ def main(argv=None):
     ap.add_argument("--private", action="store_true")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    kit = pathlib.Path(a.kit)
+    kit = pathlib.Path(a.kit).resolve()
     if a.cmd in SECTIONS:
         print(render_section(kit, a.cmd))
     elif a.cmd == "mark":
@@ -272,4 +272,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

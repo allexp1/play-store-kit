@@ -33,6 +33,7 @@ LIFECYCLE = {   # applications.tracks.releases.list → releaseLifecycleState (p
     "NOT_SENT_FOR_REVIEW": ("✋", "saved, not sent for review"), "UNSPECIFIED": ("❓", "state not reported"),
 }
 STAGES = ("bound", "uploaded", "draft", "submitted", "in_review", "published", "serving")
+EXTENSION_ROWS = {"target_sdk.extension_until": "target_sdk", "billing_library.extension_until": "billing_library"}
 DEADLINES = [   # (rule id or None, label, date-rule or fixed date, source)
     ("target_sdk.mobile.min", "Target API {v} for new apps and updates (phones)", "target_sdk.mobile.min", None),
     ("target_sdk.extension_until", "Target API extension ends", None, None),
@@ -66,6 +67,7 @@ def collect(kit, today) -> dict:
     facts = build.load_yaml(kit / "facts.yaml") or {}
     history = build.load_yaml(kit / "releases" / "release-history.yaml") or {}
     plan = _json(kit / "play-plan.json")
+    extensions = (build.load_yaml(kit / "policy-extensions.yaml") or {}).get("extensions") or []
     unresolved = []
     for j in sorted((kit / "private" / "journal").glob("*.jsonl")):
         for e in play_edit.Journal(j).unresolved():
@@ -73,7 +75,7 @@ def collect(kit, today) -> dict:
     locks = [p.name for p in (kit / "private" / "locks").glob("*.lock")]
     return dict(kit=kit, today=today, live=live, console=console, facts=facts, history=history, plan=plan,
                 progress=console_guide.load_progress(kit), testing=testing_evidence.status(kit, today),
-                unresolved=unresolved, locks=locks, rules=rules_mod.load())
+                unresolved=unresolved, locks=locks, rules=rules_mod.load(), extensions=extensions)
 
 
 def journey_rows(c) -> list[tuple]:
@@ -145,7 +147,10 @@ def release_rows(c) -> list[dict]:
 
 def deadline_rows(c) -> list[tuple]:
     rules, today, out = c["rules"], c["today"], []
+    granted = {e.get("kind") for e in c.get("extensions") or [] if isinstance(e, dict)}
     for rid, label, ref, src in DEADLINES:
+        if rid in EXTENSION_ROWS and EXTENSION_ROWS[rid] not in granted:
+            continue   # an extension end only matters to an app that recorded one in policy-extensions.yaml
         if rid is None:
             date, url = _d(ref), src
         else:
@@ -207,7 +212,7 @@ def main(argv=None):
     ap.add_argument("--print", action="store_true", help="print instead of writing STATUS.md")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args(argv)
-    kit = pathlib.Path(a.kit)
+    kit = pathlib.Path(a.kit).resolve()
     c = collect(kit, _d(a.today) if a.today else dt.date.today())
     if a.json:
         print(json.dumps({"journeys": journey_rows(c), "releases": release_rows(c), "deadlines": deadline_rows(c),
@@ -224,4 +229,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())

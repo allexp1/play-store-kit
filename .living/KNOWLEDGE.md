@@ -24,7 +24,8 @@ spec: living-skills/1.1
   10 MB apps / 50 MB games) enforced.
 - April 2027 — zero-tap sign-in restoration (Restore Credentials) for apps with
   sign-in on phones and tablets.
-- 2027-08-31 — Billing Library 8 deprecation deadline (extension to 2027-11-01).
+- 2027-08-31 — Billing Library 8 deadline: new apps and updates need Billing Library 9
+  or later (extension to 2027-11-01). Checked 2026-10-19 on the deprecation FAQ table.
 
 ## Known API gaps (Console or person only)
 

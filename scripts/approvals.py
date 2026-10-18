@@ -157,6 +157,7 @@ def main(argv=None):
     ap.add_argument("--text")
     ap.add_argument("--channel", choices=("chat", "cli"), default="chat")
     a = ap.parse_args(argv)
+    a.kit = str(pathlib.Path(a.kit).resolve())   # absolute from the start: git and writers never depend on cwd
     try:
         if a.cmd == "list":
             for p in sorted(approvals_dir(a.kit).glob("*.json")):
@@ -177,4 +178,6 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import deps
+    deps.require()
     sys.exit(main())
