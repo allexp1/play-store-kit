@@ -1,0 +1,17 @@
+# What Play Console says about the app. Filled by the person (App integrity) and by `release.py import`.
+developer_account_id: null
+package: com.example.app
+service_account_email: null       # the email only; the key file path lives in private/credentials.yaml
+upload_certificate_sha256: null   # App integrity -> Play app signing -> Upload key certificate -> SHA-256
+publishing_mode: unknown          # standard | managed | unknown (read from Publishing overview)
+tracks:                           # track ids are written by `release.py import`, never typed by hand
+  internal: null
+  closed: {}
+  open: null
+  production: null
+tracks_imported_at: null
+tester_groups: {}                 # track id -> [google group emails]
+managed:                          # what the kit may change; anything not listed is left alone
+  listings: []
+  images: {}
+  tracks: []

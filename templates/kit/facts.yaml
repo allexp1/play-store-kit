@@ -1,0 +1,34 @@
+# What the app is. precheck.py, console_guide.py and the status board read this file.
+# Leave an answer as null when you do not know it yet: the kit asks instead of guessing.
+package: com.example.app
+app_name: Example
+category_type: app            # app | game
+category: PRODUCTIVITY        # Play category id
+default_locale: en-US
+locales: [en-US]              # store-listing languages
+free_or_paid: free            # paid -> free is possible once; free -> paid never
+account:
+  type: personal              # personal | organization
+  created: null               # YYYY-MM-DD, from Play Console -> Account details
+  created_after_2023_11_13: null
+  organization: null          # legal name for organization accounts (D-U-N-S)
+declarations:                 # true | false | null (unanswered)
+  ads: null
+  advertising_id: null
+  account_creation: null
+  digital_goods: null         # sells digital goods or subscriptions in the app
+  genai: null                 # generates text, images, audio or video with AI
+  children_audience: null
+  financial: null
+  health: null
+  government: null
+  vpn: null
+  ugc: null                   # user-generated content
+genai:                        # only when declarations.genai is true
+  reporting_entry_point: null # where people report AI output in the app
+  ad_creatives_reviewed: null
+  data_safety_reflects_prompts: null
+privacy_policy_url: null
+account_deletion_url: null    # web page where people ask to delete their account and data
+target_devices: [phone, tablet]   # phone, tablet, wear, tv, auto, xr
+frameworks: []                # e.g. [flutter], filled by build.py inspect

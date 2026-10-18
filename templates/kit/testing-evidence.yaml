@@ -1,0 +1,16 @@
+# Closed-test evidence for production access (personal accounts created after 2023-11-13).
+# Add rows with: python3 scripts/testing_evidence.py add --date YYYY-MM-DD --testers-opted-in N --source console
+observations: []
+#  - date: 2026-10-01
+#    track: alpha
+#    testers_opted_in: 12
+#    source: console        # console | attested
+#    note: "Testers page, Opted-in count"
+applications: []
+#  - date: 2026-10-20
+#    note: "Applied from Dashboard -> Apply for production"
+decisions: []
+#  - date: 2026-10-27
+#    outcome: granted        # granted | denied
+#    reasons: ""
+#    source: console

@@ -1,0 +1,6 @@
+# Waivers for inference and question findings only. Every field is required.
+decisions: []
+#  - rule: R-ADID
+#    reason: "Ads are contextual; the advertising ID is never read"
+#    date: 2026-10-18
+#    decided_by: owner

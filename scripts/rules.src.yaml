@@ -1,0 +1,248 @@
+# Reviewed source for scripts/rules.json. Edit here, then: python3 scripts/rules.py freeze
+#
+# Every value comes from a Google page read on fetched_at; source_section points at
+# plan/RESEARCH.md. `rules.py check` re-fetches the pages and reports drift as an
+# advisory review task; it never rewrites a value. A fact Google does not publish
+# stays `value: null` with `status: unverified`.
+defaults:
+  fetched_at: "2026-10-18"
+  reviewed_by: "RESEARCH.md second pass + REVIEW-codex.md"
+  review_decision: accepted
+  status: verified
+
+rules:
+  # --- Target API (B-TARGET) ---
+  - id: target_sdk.mobile.min
+    value: 36
+    unit: api_level
+    applies_to: new apps and updates, phone and tablet
+    effective_from: "2026-08-31"
+    source_url: https://support.google.com/googleplay/android-developer/answer/11926878
+    source_section: "§5.1"
+  - id: target_sdk.extension_until
+    value: "2026-11-01"
+    unit: date
+    applies_to: apps granted the extension in Policy status
+    source_url: https://support.google.com/googleplay/android-developer/answer/11926878
+    source_section: "§5.1"
+  - id: target_sdk.wear.min
+    value: 35
+    unit: api_level
+    applies_to: new apps and updates, Wear OS
+    effective_from: "2026-08-31"
+    source_url: https://developer.android.com/google/play/requirements/target-sdk
+    source_section: "§5.1"
+  - id: target_sdk.automotive.min
+    value: 35
+    unit: api_level
+    applies_to: new apps and updates, Android Automotive OS
+    effective_from: "2026-08-31"
+    source_url: https://developer.android.com/google/play/requirements/target-sdk
+    source_section: "§5.1"
+  - id: target_sdk.tv.min
+    value: 34
+    unit: api_level
+    applies_to: new apps and updates, Android TV
+    effective_from: "2026-08-31"
+    source_url: https://developer.android.com/google/play/requirements/target-sdk
+    source_section: "§5.1"
+    notes: corrected per Codex review; TV row confirmed on the target-sdk page
+  - id: target_sdk.xr.min
+    value: 34
+    unit: api_level
+    applies_to: new apps and updates, Android XR
+    effective_from: "2026-08-31"
+    source_url: https://developer.android.com/google/play/requirements/target-sdk
+    source_section: "§5.1"
+  - id: target_sdk.discoverable.mobile.min
+    value: 35
+    unit: api_level
+    applies_to: existing apps, to stay available to new users on newer devices (WARNING, not a submission blocker)
+    effective_from: "2026-08-31"
+    source_url: https://support.google.com/googleplay/android-developer/answer/11926878
+    source_section: "§5.1"
+
+  # --- 16 KB pages and 64-bit (B-16K, B-64BIT) ---
+  - id: page_size.alignment_bytes
+    value: 16384
+    unit: bytes
+    applies_to: PT_LOAD p_align of every packaged 64-bit .so, apps targeting API 35+
+    effective_from: "2025-11-01"
+    source_url: https://developer.android.com/guide/practices/page-sizes
+    source_section: "§5.2"
+  - id: page_size.update_enforcement
+    value: "2027-02-01"
+    unit: date
+    applies_to: updates of existing apps without 16 KB support can no longer be released
+    source_url: https://developer.android.com/guide/practices/page-sizes
+    source_section: "§5.2"
+  - id: page_size.wear_from
+    value: "2026-09-15"
+    unit: date
+    applies_to: Wear OS native code, 64-bit and 16 KB
+    source_url: https://support.google.com/googleplay/android-developer/answer/17492799
+    source_section: "Addendum A.4"
+  - id: page_size.tv_from
+    value: "2026-08-01"
+    unit: date
+    applies_to: Android TV native code, 64-bit and 16 KB
+    source_url: https://support.google.com/googleplay/android-developer/answer/17492799
+    source_section: "Addendum A.4"
+
+  # --- Version code (B-VERSION) ---
+  - id: version_code.max
+    value: 2100000000
+    unit: integer
+    applies_to: inclusive maximum versionCode
+    source_url: https://developer.android.com/studio/publish/versioning
+    source_section: "§5.3"
+
+  # --- Download size (B-SIZE), compressed ---
+  - id: size.base_module.max_mb
+    value: 500
+    unit: MB
+    applies_to: compressed download of the base module
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859372
+    source_section: "§5.3"
+  - id: size.feature_module.max_mb
+    value: 500
+    unit: MB
+    applies_to: compressed download of each feature module
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859372
+    source_section: "§5.3"
+  - id: size.asset_pack.max_mb
+    value: 1536
+    unit: MB
+    applies_to: each asset pack (1.5 GB)
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859372
+    source_section: "§5.3"
+  - id: size.install_time_total.max_mb
+    value: 4096
+    unit: MB
+    applies_to: all modules plus install-time asset packs (4 GB)
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859372
+    source_section: "§5.3"
+  - id: size.mobile_data_warning_mb
+    value: 200
+    unit: MB
+    applies_to: above this, Play shows a mobile-data install prompt (WARNING)
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859372
+    source_section: "§5.3"
+
+  # --- Billing Library (B-BILLING-LIB) ---
+  - id: billing_library.min_major
+    value: 8
+    unit: major_version
+    applies_to: new apps and updates using Play Billing
+    effective_from: "2026-08-31"
+    source_url: https://developer.android.com/google/play/billing/deprecation-faq
+    source_section: "Addendum A.6"
+    notes: "v7 deadline 2026-08-31, extension to 2026-11-01; the page reminder says v8 or later from 2026-08-31"
+  - id: billing_library.extension_until
+    value: "2026-11-01"
+    unit: date
+    applies_to: apps granted the Billing Library extension
+    source_url: https://developer.android.com/google/play/billing/deprecation-faq
+    source_section: "Addendum A.6"
+  - id: billing_library.next_deadline
+    value: "2027-08-31"
+    unit: date
+    applies_to: v8 deprecation (WARNING); extension to 2027-11-01
+    source_url: https://developer.android.com/google/play/billing/deprecation-faq
+    source_section: "Addendum A.6"
+
+  # --- Closed-test gate (W-TESTING-GATE) ---
+  - id: testing_gate.accounts_created_after
+    value: "2023-11-13"
+    unit: date
+    applies_to: personal developer accounts
+    source_url: https://support.google.com/googleplay/android-developer/answer/14151465
+    source_section: "§2.3"
+  - id: testing_gate.testers
+    value: 12
+    unit: testers
+    applies_to: opted in continuously when applying for production
+    source_url: https://support.google.com/googleplay/android-developer/answer/14151465
+    source_section: "§2.3"
+  - id: testing_gate.days
+    value: 14
+    unit: days
+    applies_to: continuous opt-in window before applying
+    source_url: https://support.google.com/googleplay/android-developer/answer/14151465
+    source_section: "§2.3"
+
+  # --- Store listing text (v1.1 listings; release notes in v1) ---
+  - id: listing.title.max_chars
+    value: 30
+    unit: characters
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859152
+    source_section: "§6.1"
+  - id: listing.short_description.max_chars
+    value: 80
+    unit: characters
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859152
+    source_section: "§6.1"
+  - id: listing.full_description.max_chars
+    value: 4000
+    unit: characters
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859152
+    source_section: "§6.1"
+  - id: release_notes.max_chars
+    value: 500
+    unit: characters
+    applies_to: per language
+    source_url: https://support.google.com/googleplay/android-developer/answer/9859152
+    source_section: "§6.1"
+
+  # --- Reviews (v1.1) ---
+  - id: reviews.reply.max_chars
+    value: 350
+    unit: characters
+    applies_to: approximate; HTML is stripped
+    source_url: https://developers.google.com/android-publisher/api-ref/rest/v3/reviews/reply
+    source_section: "§3.7"
+
+  # --- Vitals (v1.1 vitals, status board) ---
+  - id: vitals.crash_rate.bad
+    value: 1.09
+    unit: percent
+    applies_to: user-perceived crash rate, overall, last 28 days
+    source_url: https://developer.android.com/topic/performance/vitals
+    source_section: "§7.3"
+  - id: vitals.anr_rate.bad
+    value: 0.47
+    unit: percent
+    applies_to: user-perceived ANR rate, overall, last 28 days
+    source_url: https://developer.android.com/topic/performance/vitals
+    source_section: "§7.3"
+  - id: vitals.per_phone_model.bad
+    value: 8
+    unit: percent
+    applies_to: crash and ANR, per phone model
+    source_url: https://developer.android.com/topic/performance/vitals
+    source_section: "§7.3"
+
+  # --- DEX optimization (W-DEX), enforced from February 2027 ---
+  - id: dex.app.threshold_mb
+    value: 10
+    unit: MB
+    applies_to: apps; above it, at least 25 % obfuscation, optimization and shrinking
+    effective_from: "2027-02-01"
+    source_url: https://support.google.com/googleplay/android-developer/answer/17492799
+    source_section: "Addendum A.4"
+  - id: dex.game.threshold_mb
+    value: 50
+    unit: MB
+    applies_to: games; same 25 % rule
+    effective_from: "2027-02-01"
+    source_url: https://support.google.com/googleplay/android-developer/answer/17492799
+    source_section: "Addendum A.4"
+
+  # --- Facts Google does not publish ---
+  - id: edit.expiry_seconds
+    value: null
+    status: unverified
+    unit: seconds
+    applies_to: lifetime of an edit; the kit reads expiryTimeSeconds from each AppEdit instead
+    source_url: https://developers.google.com/android-publisher/api-ref/rest/v3/edits
+    source_section: "§3.2, §9"

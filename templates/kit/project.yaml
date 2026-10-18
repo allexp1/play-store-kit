@@ -1,0 +1,10 @@
+# How to build the App Bundle. build.py reads this file.
+kind: gradle                  # gradle | flutter | react-native | expo | unity | external
+root: ..                      # project root, relative to this kit folder
+module: app
+variant: release
+build_command: null           # override, e.g. "./gradlew :app:bundleProdRelease"
+output_glob: null             # override; default per kind (kind: external -> the path or glob of your signed AAB)
+mapping_path: null            # e.g. app/build/outputs/mapping/release/mapping.txt
+native_symbols_path: null
+version_source: null          # where versionCode lives when bump cannot find it

@@ -1,0 +1,8 @@
+# One entry per release the kit planned. Written by release.py; edit only the attested fields.
+releases: []
+#  - version_code: 12
+#    version_name: "1.2.0"
+#    track: production
+#    plan_id: null
+#    stages: {}             # bound, uploaded, draft, submitted, in_review, published, serving -> timestamp
+#    runtime_16k_check: null  # attested date of a run on a 16 KB emulator image

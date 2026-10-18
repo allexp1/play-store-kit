@@ -1,0 +1,51 @@
+{
+  "name": "play-store-kit",
+  "version": "1.0.0",
+  "description": "A Claude skill that takes an Android app to Google Play and keeps it there: artifact pre-check against Play requirements, signed App Bundle upload, review, staged rollout and recovery through the official Google Play Developer API, every live effect behind its own approval.",
+  "bin": {
+    "play-store-kit": "bin/install.js"
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=16.7.0"
+  },
+  "files": [
+    "bin/",
+    "SKILL.md",
+    "scripts/",
+    "references/",
+    "templates/",
+    ".living/",
+    "requirements.txt",
+    "README.md",
+    "LICENSE",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agent-skill",
+    "skill",
+    "google-play",
+    "play-console",
+    "android",
+    "app-bundle",
+    "aab",
+    "androidpublisher",
+    "staged-rollout",
+    "target-api",
+    "16kb-page-size",
+    "data-safety",
+    "android-vitals"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/allexp1/play-store-kit.git"
+  },
+  "homepage": "https://github.com/allexp1/play-store-kit#readme",
+  "bugs": {
+    "url": "https://github.com/allexp1/play-store-kit/issues"
+  },
+  "license": "MIT"
+}

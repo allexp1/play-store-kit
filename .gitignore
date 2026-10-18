@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+node_modules/
+*.tgz
+.venv/
+# Never commit Play credentials, signing keys or a kit's private values.
+private/
+play-store-kit/private/
+play-store-kit/captures/
+*.jks
+*.keystore
+keystore.properties
+*service-account*.json
+*-sa.json
+assets/
+*.p8
+
+# Internal planning notes and review logs stay local.
+plan/
+*.log
