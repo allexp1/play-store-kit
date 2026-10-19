@@ -53,7 +53,28 @@ bundles uploaded into it. How the kit owns edits: `transactions-and-approvals.md
 | `edits.bundles.upload` (resumable), `edits.bundles.list` | reconcilable / read | apply, reconcile |
 | `edits.deobfuscationfiles.upload` (resumable) | reconcilable | apply (`proguard`, `nativeCode`) |
 | `edits.listings.list`, `edits.details.get`, `edits.images.list`, `edits.testers.get`, `edits.countryavailability.get` | read | import |
+| `edits.listings.get` / `update`, `edits.details.update`, `edits.images.deleteall` | read / idempotent | `listing.py` |
+| `edits.images.upload` (resumable, `image/*`) | reconcilable | `listing.py` |
+| `edits.testers.update` (Google Groups) | idempotent | contract only; tester sync comes with 1.1 |
 | `applications.tracks.releases.list` | read | status, wait, `connect`, landed checks (no edit) |
+| `monetization.onetimeproducts.list` / `batchUpdate`, `…purchaseOptions.batchUpdateStates`, `monetization.convertRegionPrices` | read / reconcilable | contract only; product sync comes with 1.2 |
+
+**One-time products use only the monetization API.** The legacy `inappproducts.*` methods answer 403 "Please migrate
+to the new publishing API" for a new app, so the kit never calls them. Paths are camelCase (`oneTimeProducts`), except
+`onetimeproducts.patch`, whose flatPath is lowercase. Creating a product is three calls: `pricing:convertRegionPrices`
+(prices for every region from one base price) → `oneTimeProducts:batchUpdate` with `allowMissing` and
+`regionsVersion` → `purchaseOptions:batchUpdateStates` to activate. Every monetization call answers 403 "The caller
+does not have permission" until the Google Payments merchant account is set up and verified.
+
+## Store presence (`listing.py`)
+
+Texts come from `KIT/listings.json` (language → Listing), details from `details.json`, graphics from `images.json`
+(language → image type → files). `listing.py lint` checks lengths against `rules.json`; `probe` writes each kind into
+its own throwaway edit, validates and deletes it, so one refused part does not sink a large change (a 403 at validate
+on a draft app means the service account lacks "Edit and delete draft apps"; an empty edit still validates, which is
+how the probe tells the cause). `plan` → G-META-PUB → `apply` → `commit` works like a release. Images uploaded into an
+edit that is later refused or deleted still appear in the Console's asset library; screenshot order is the upload
+order in the edit, so check it in the Console editor after a Console upload.
 
 `edits.commit` always carries `changesInReviewBehavior=ERROR_IF_IN_REVIEW`. Google's default,
 `CANCEL_IN_REVIEW_AND_SUBMIT`, cancels a review that is already running; the kit never sends it, and never sends
@@ -92,6 +113,12 @@ The returned `Bundle {versionCode, sha1, sha256}` must match the planned artifac
 | 404 on an edit | expired or superseded | exit 7 |
 | 400 `editInvalidated` / 409 | changed in the Console or by another client | exit 7 |
 | 400 `FAILED_PRECONDITION` `CHANGES_ALREADY_IN_REVIEW` | review open; edit kept | exit 4 |
+| 400 "Only releases with status draft may be created on draft app" | the app was never published | plan `--status draft`; roll out in the Console |
+| 403 at `edits.validate` after listing, details or tester changes | draft app, no "Edit and delete draft apps" | grant it; takes a few minutes |
+| 403 on `monetization.*` / `pricing:*` | no verified Google Payments merchant account | Monetization setup first |
+| 403 "Please migrate to the new publishing API" | legacy `inappproducts` | `monetization.onetimeproducts` |
+
+`PlayError.explain()` prints the likely cause for the last four ("likely cause: …").
 
 ## Commands
 
@@ -100,12 +127,13 @@ python3 scripts/play_api.py connect  KIT [--track production]   # edit-free capa
 python3 scripts/play_api.py releases KIT --track production     # releases.list
 python3 scripts/play_api.py whoami   KIT                        # client_email only
 python3 scripts/play_edit.py show    KIT                        # plan, lock and journal state
+python3 scripts/listing.py   lint|probe|plan|apply|commit KIT  # store listing texts, details, graphics
 ```
 
 ## What the API cannot do
 
 Create the app, the first upload, content rating, the App content declarations, category and tags, price and
 countries (country availability is read-only), custom store listings and experiments, promotional content,
-pre-registration, applying for production access, tester email lists, Android XR / Chromebook / Automotive
+pre-registration, applying for production access, tester email lists (the API sets Google Groups only), Android XR / Chromebook / Automotive
 screenshots, publish / unpublish, managed publishing's **Publish changes**, upload-key reset, Policy status and
 appeals. Each is a Console step: `person-and-browser-steps.md`.

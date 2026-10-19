@@ -15,7 +15,7 @@ Waivers live in KIT/precheck-decisions.yaml: [{rule, reason, date, decided_by}];
 question findings only. Extensions granted in Policy status go in KIT/policy-extensions.yaml:
 [{kind: target_sdk|billing_library, until: YYYY-MM-DD, observed_at, source: console}].
 
-Writes KIT/PRECHECK.md. Exit 1 on a BLOCKER or a blocking QUESTION (--strict: also LIKELY), else 0.
+Writes KIT/PRECHECK.md and KIT/precheck.json (read by console_guide.py). Exit 1 on a BLOCKER or a blocking QUESTION (--strict: also LIKELY), else 0.
 """
 from __future__ import annotations
 
@@ -306,18 +306,27 @@ def check_version(ctx) -> list[Finding]:
 
 def check_size(ctx) -> list[Finding]:
     size = ctx.rec.compressed_download_bytes
+    warn = ctx.rule("size.mobile_data_warning_mb")
     if not size:
+        raw_mb = ctx.rec.size_bytes / (1024 * 1024)
+        if raw_mb > warn:
+            return [Finding("B-SIZE", "WARNING", "artifact", f"the AAB is {raw_mb:.0f} MB, so the device download "
+                            f"may pass {warn} MB, where Play asks phone users before installing over mobile data "
+                            "and installs drop. Measure it with --size (the raw AAB size is not the download size)",
+                            "move large assets to Play Asset Delivery asset packs (install-time or fast-follow)",
+                            ctx.src("size.mobile_data_warning_mb"))]
         return [Finding("B-SIZE", "INFO", "artifact", "compressed download size not measured (run with --size; the raw "
                         "AAB size is not the download size)", source=ctx.src("size.base_module.max_mb"))]
     mb = size["max"] / (1024 * 1024)
-    limit, warn = ctx.rule("size.base_module.max_mb"), ctx.rule("size.mobile_data_warning_mb")
+    limit = ctx.rule("size.base_module.max_mb")
     if mb > limit:
         return [Finding("B-SIZE", "BLOCKER", "artifact", f"largest device download is {mb:.0f} MB, over the {limit} MB "
                         "base-module limit", "move assets to asset packs (Play Asset Delivery)",
                         ctx.src("size.base_module.max_mb"))]
     if mb > warn:
         return [Finding("B-SIZE", "WARNING", "artifact", f"largest device download is {mb:.0f} MB: Play asks before "
-                        f"installing over mobile data above {warn} MB", "trim or use asset packs",
+                        f"installing over mobile data above {warn} MB, and installs drop",
+                        "move large assets to Play Asset Delivery asset packs (install-time or fast-follow)",
                         ctx.src("size.mobile_data_warning_mb"))]
     return []
 
@@ -465,7 +474,11 @@ def check_account(ctx) -> list[Finding]:
                 out.append(Finding("W-ORG", "BLOCKER", "facts", f"{d} apps need an organization developer account",
                                    "publish from an organization account", POLICY + "13634885"))
         after = _date(ctx.rule("testing_gate.accounts_created_after"))
-        if acct.get("created_after_2023_11_13") or (_date(acct.get("created")) and _date(acct["created"]) > after):
+        # The Console shows no account creation date. The app's Dashboard → Production card is the evidence:
+        # console.yaml testing_gate_shown true / false wins over the date when it is recorded.
+        shown = ctx.console.get("testing_gate_shown")
+        by_date = acct.get("created_after_2023_11_13") or (_date(acct.get("created")) and _date(acct["created"]) > after)
+        if shown is True or (shown is None and by_date):
             granted = any((d or {}).get("outcome") == "granted" for d in (ctx.testing.get("decisions") or []))
             if not granted:
                 out.append(Finding("W-TESTING-GATE", "BLOCKER", "console",
@@ -473,9 +486,16 @@ def check_account(ctx) -> list[Finding]:
                                    f"testers opted in for {ctx.rule('testing_gate.days')} days and Google's approval "
                                    "(blocks production only)", "testing_evidence.py add … then apply in the Console",
                                    ctx.src("testing_gate.testers")))
-    if not (ctx.live.get("developer_verification") or {}).get("observed_at"):
+    marked = (_yaml(ctx.kit / "console-progress.yaml").get("steps") or {}).get("verification") or {}
+    if (ctx.live.get("developer_verification") or {}).get("observed_at") or marked.get("state") == "observed":
+        pass
+    elif marked.get("state") == "attested":
+        out.append(Finding("W-VERIFY", "INFO", "attested", f"developer verification recorded as done by the person "
+                           f"({marked.get('date')})", source="https://developer.android.com/developer-verification"))
+    else:
         out.append(Finding("W-VERIFY", "WARNING", "console", "developer verification / Play package registration "
-                           "status is not recorded", "read it on Play Console Home (console_guide.py)",
+                           "status is not recorded", "read it on Play Console Home, then "
+                           "`console_guide.py KIT mark verification --state observed --url …`",
                            "https://developer.android.com/developer-verification"))
     return out
 
@@ -496,6 +516,16 @@ def check_quality(ctx) -> list[Finding]:
                            "obfuscation, optimization and shrinking above "
                            f"{limit} MB", "enable R8 (isMinifyEnabled = true) and upload mapping.txt",
                            ctx.src("dex.app.threshold_mb")))
+    if rec.native_libs and not rec.bundled_debug_symbols and not rec.native_symbols_path:
+        out.append(Finding("N-SYMBOLS", "INFO", "artifact", f"{len(rec.native_libs)} native libraries and no native "
+                           "debug symbols: Play warns on upload and native crashes in Android vitals stay "
+                           "unsymbolicated", 'android { buildTypes { release { ndk { debugSymbolLevel = "SYMBOL_TABLE" } } } }',
+                           "https://developer.android.com/build/include-native-symbols"))
+    if ctx.console.get("automatic_protection"):
+        out.append(Finding("I-PROTECT", "INFO", "console", "Automatic protection is on: Play adds an installer check "
+                           "to the app's code when it is distributed, and sideloaded copies ask people to get the app "
+                           "from Google Play. Debug a 'get this app from Play' prompt with that in mind",
+                           source=POLICY + "10183279"))
     if ctx.sdk(SIGNIN_SDKS):
         out.append(Finding("W-RESTORE", "INFO", "inference", "sign-in SDK present: zero-tap sign-in restoration "
                            "(Restore Credentials) is expected from April 2027", source=POLICY + "17492799"))
@@ -549,6 +579,15 @@ def render(rec, findings, today) -> str:
     return "\n".join(lines) + "\n"
 
 
+def summary(rec, findings, today) -> dict:
+    """What console_guide.py needs from the last pre-check: the artifact, the signer and the R-PERM forms."""
+    forms = sorted({f.message.split('"')[1] for f in findings if f.id == "R-PERM" and f.message.count('"') >= 2})
+    return {"checked": str(today), "aab": rec.path, "package": rec.package, "version_code": rec.version_code,
+            "signer_sha256": rec.signer_sha256, "permission_declarations": forms,
+            "billing": any(p.endswith(".BILLING") for p in rec.permissions),
+            "findings": [{"id": f.id, "severity": f.severity, "waived": bool(f.waived)} for f in findings]}
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("project", nargs="?")
@@ -586,6 +625,9 @@ def main(argv=None):
         text = render(rec, findings, today)
         if not args.dry_run and pathlib.Path(args.kit).is_dir():
             (pathlib.Path(args.kit) / "PRECHECK.md").write_text(text, encoding="utf-8")
+            (pathlib.Path(args.kit) / "precheck.json").write_text(json.dumps(summary(rec, findings, today), indent=2,
+                                                                             ensure_ascii=False) + "\n",
+                                                                  encoding="utf-8")
         print(text)
     return 1 if any(f.counts(args.strict) for f in findings) else 0
 

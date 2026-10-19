@@ -332,3 +332,45 @@ def test_board_shows_extension_ends_only_when_recorded(kit):
                                                       "observed_at": "2026-10-18", "source": "console"}])
     labels = [r[2] for r in status_board.deadline_rows(_board(kit))]
     assert "Billing Library extension ends" in labels and "Target API extension ends" not in labels
+
+
+def test_guide_app_access_follows_facts():
+    no_accounts = {"declarations": {"account_creation": False, "digital_goods": False}}
+    assert "All functionality is available" in console_guide.app_access_text(no_accounts)
+    gate = {"declarations": {"account_creation": False}, "app_access": {"instructions": "hold the grown-up button"}}
+    assert "restricted" in console_guide.app_access_text(gate) and "grown-up" in console_guide.app_access_text(gate)
+    paid = {"declarations": {"account_creation": False, "digital_goods": True}}
+    t = console_guide.app_access_text(paid)
+    assert "promo code" in t and "500 characters" in t and "partner devices" in t
+    assert "sign-in" in console_guide.app_access_text({"declarations": {"account_creation": True}})
+
+
+def test_guide_steps_for_a_paid_childrens_app():
+    facts = {"package": "com.acme.kids", "declarations": {"digital_goods": True, "children_audience": True}}
+    console = {"developer_account_id": "123", "console_user_index": 4, "app_id": "987"}
+    pre = {"aab": "/b/app.aab", "signer_sha256": "a452ec" + "00" * 29,
+           "permission_declarations": ["Foreground service types declaration"]}
+    st = {s["id"]: s["do"] for s in console_guide.steps(facts, console, pre)}
+    ids = list(st)
+    assert ids.index("payments-profile") < ids.index("in-app-products") < ids.index("promo-codes")
+    assert ids.index("first-upload") < ids.index("in-app-products")
+    assert "store-listing" in st and "Foreground service types declaration" in st["app-content"]
+    assert "COPPA" in st["target-audience"] and "Teacher Approved" in st["target-audience"]
+    assert "A4:52:EC:" in st["upload-cert"] and "stop" in st["upload-cert"]
+    assert 'open -R "/b/app.aab"' in st["first-upload"] and "Releases are signed by Google Play" in st["first-upload"]
+    assert "accept Play App Signing" not in st["first-upload"]
+    assert "Check availability" in st["create-app"] and "com.acme.kids" in st["create-app"]
+    assert "Edit and delete draft apps" in st["invite"] and "View financial data" in st["invite"]
+    assert "https://play.google.com/console/u/4/developers/123/users-and-permissions" in st["invite"]
+    assert "u/4/developers/123/app/987/app-dashboard" in st["testing-gate"]
+
+
+def test_free_app_has_no_product_steps():
+    ids = {s["id"] for s in console_guide.steps({"declarations": {"digital_goods": False}}, {})}
+    assert not ids & {"payments-profile", "in-app-products", "promo-codes"}
+    assert {"developer-account", "testing-gate", "send-for-review"} <= ids
+
+
+def test_mark_accepts_conditional_steps(kit):
+    console_guide.mark(kit, "promo-codes", "attested")
+    assert console_guide.load_progress(kit)["promo-codes"]["state"] == "attested"

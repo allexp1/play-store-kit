@@ -1,6 +1,6 @@
 ---
 name: play-store-kit
-version: "1.0.1"
+version: "1.0.2"
 description: "Takes an Android app to Google Play and keeps it there, through the official Google Play Developer API with every live effect behind its own approval: service-account connection and capability check, bootstrap of a new app (Console first), adoption of an existing app, a code and artifact pre-check against Play requirements (target API incl. TV/XR, 16 KB ELF alignment, 64-bit, Billing Library deadline, versionCode, download size, Data safety, GenAI rules), signed App Bundle upload as a draft, send for review, edit-free status and waiting, staged rollout, halt/resume/promote, recovery after lost responses, the closed-test gate tracked from evidence, and the Play Console steps the API cannot do as a guided checklist. Use when the person says \"publish on Google Play\", \"Play Console\", \"AAB / app bundle\", \"internal / closed / open testing\", \"staged rollout\", \"target API level\", \"Data safety\", \"app rejected / removed from Play\", or wants the Android version of app-store-kit."
 ---
 
@@ -23,22 +23,29 @@ A script started without them prints this command and exits 1.
 | The owner says | Journey | Steps |
 |---|---|---|
 | "Connect my Play account" | **J0 Connect** | `console_guide.py KIT service-account` (person) → `play_api.py connect KIT` → capability matrix |
-| "Put my app on Google Play" (new app) | **J1 Bootstrap** | `validate_kit.py KIT --init` (kit files + .gitignore lines) → `build.py inspect` → `precheck.py` → `console_guide.py KIT bootstrap` → person uploads the first signed AAB in the Console → J0 → `release.py import` |
+| "Put my app on Google Play" (new app) | **J1 Bootstrap** | `validate_kit.py KIT --init` (kit files + .gitignore lines) → `build.py inspect` → `precheck.py` → `console_guide.py KIT bootstrap` (starts with which developer account; Create app takes the package name) → person drags the first signed AAB into the Console → J0 → `release.py import --write-kit` → `console.yaml app_state: draft` until the first release is rolled out |
 | "Manage my existing Play app" | **J2 Adopt** | `validate_kit.py KIT --init` → `release.py import KIT --write-kit` (read-only) → set `managed:` in `console.yaml` |
 | "Ship 1.4", "upload to internal testing" | **J3 Release** | `build.py bundle` → `precheck.py` → `release.py plan` → G-UPLOAD 🛑 → `apply` → G-TEST-DIST / G-PROD-SUBMIT 🛑 → `commit` → `wait` |
 | "What's the status?", "did Google approve it?" | **J4 Status** | `release.py status KIT` (edit-free) → `status_board.py KIT` |
 | "Roll out to 20 %", "halt", "resume", "promote" | **J5 Rollout** | `release.py rollout|halt|resume|promote` → G-ROLLOUT 🛑, one transition per plan |
 | "Something failed mid-upload", "did the commit go through?" | **J5 Recover** | `release.py reconcile KIT` before anything else |
 | "Get production access", "12 testers" | **J6 Testing gate** | `release.py tracks` → `testing_evidence.py add` (dated) → `testing_evidence.py status` → person applies |
-| "Will Google accept my app?" | **Pre-check** | `precheck.py PROJECT` or `--aab PATH` → `PRECHECK.md` |
+| "Will Google accept my app?" | **Pre-check** | `precheck.py PROJECT` or `--aab PATH` → `PRECHECK.md` + `precheck.json` (the guide reads it) |
+| "Upload the store listing", "screenshots" | **Listing** | `listing.py lint` → `probe` (each kind in a throwaway edit) → `plan` → G-META-PUB 🛑 → `apply` → `commit` |
 
-Listings, screenshots, Data safety, reviews and vitals are version 1.1; products, pricing and growth briefs are 1.2.
-Until then, guide the person through those Console screens with `console_guide.py KIT render`.
+Data safety, reviews, tester sync and vitals are version 1.1; products, pricing and growth briefs are 1.2 (one-time
+products only through the monetization API; the legacy `inappproducts` API is closed to new apps). Until then, guide
+the person through those Console screens with `console_guide.py KIT render`.
+
+**A draft app** (never published) takes only draft releases, and listing, details and tester writes need the service
+account's "Edit and delete draft apps" permission. The person confirms the first release in the Console (Edit release
+→ Next → Save) and presses Send app for review.
 
 ## Rules of the road
 
-- **Ask only what the repo, the artifact and the account can't tell you,** in one short batch (account type and
-  creation date, declarations in `facts.yaml`, publishing mode).
+- **Ask only what the repo, the artifact and the account can't tell you,** in one short batch (account type,
+  declarations in `facts.yaml`, publishing mode). The Console shows no account creation date: read the testing gate
+  from the app's Dashboard (`console.yaml testing_gate_shown`).
 - **Keep `KIT/STATUS.md` current** with `status_board.py KIT`. Vocabulary: ✅ done (verified) · ⏸ waiting on Google ·
   🛑 approval pending · ✋ needs the person · 🌐 Play Console step · ⬜ not started · 🔴 blocked · ❓ unknown outcome
   (reconcile). "Done" needs evidence (table below), never time elapsed or `status: completed`.
@@ -46,7 +53,9 @@ Until then, guide the person through those Console screens with `console_guide.p
   own browser, read-only, for Console pages the API lacks (Publishing overview, Policy status, App integrity, testing
   pages); the person for reserved steps (account, payment, identity, declarations, IARC, price, "Apply for production",
   "Publish changes" under managed publishing, appeals). Never sign in, never type into legal, financial or identity
-  forms, never press Save, Publish or Apply.
+  forms, never press Save, Publish or Apply. Fill a form if asked, then hand over: the person ticks permission boxes,
+  accepts terms, makes attestations, presses Save / Send for review, drags the AAB in, and runs commits with
+  `! .venv/bin/python scripts/… commit …` (Claude Code's classifier blocks those clicks and commits anyway).
 - **Credentials:** a service-account JSON key only, path in `KIT/private/credentials.yaml` or
   `PLAY_SERVICE_ACCOUNT_JSON`. Never search the disk for keys, never print one, never commit one.
 - **Private data** lives in `KIT/private/` (gitignored as a whole): receipts, journals, locks, snapshots, reviewer
@@ -64,7 +73,7 @@ without a matching receipt a command exits 2 with zero external writes.
 | G-TEST-DIST | testers on that testing track can install the release once the commit lands |
 | G-PROD-SUBMIT | a production release goes to review, and under standard publishing publishes on approval |
 | G-ROLLOUT | one transition on a live track: raise the fraction, complete, halt, resume or promote |
-| G-META-PUB | listing text, images, details, release notes or a new closed track go live (1.1) |
+| G-META-PUB | listing text, images, details, release notes or a new closed track go live |
 | G-DATASAFETY, G-REPLY, G-DELETE, G-PRODUCT-DRAFT, G-PRODUCT-LIVE | their own effects (1.1 / 1.2) |
 
 `edits.commit` also sends every Console change that is "ready to send". Before a commit, record the pending items from
@@ -112,7 +121,7 @@ from memory.
 
 ## Resources
 
-- `scripts/` — `play_api.py`, `play_edit.py`, `release.py`, `build.py`, `precheck.py`, `console_guide.py`,
+- `scripts/` — `play_api.py`, `play_edit.py`, `release.py`, `listing.py`, `build.py`, `precheck.py`, `console_guide.py`,
   `testing_evidence.py`, `status_board.py`, `validate_kit.py`, `rules.py` (+ `rules.src.yaml`, `rules.json`).
 - `references/` — `play-api.md` (auth, hosts, quotas, methods, errors, resumable upload), `transactions-and-approvals.md`
   (gates, receipts, lock, journal, reconciliation), `release-and-rollout.md` (tracks, lifecycle, staged rollout,

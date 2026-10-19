@@ -17,3 +17,4 @@ A refresh that finds nothing still logs `- No changes found`.
 - CHANGED: Billing Library 2027-08-31 deadline worded as "v8 deadline, v9 or later required" to match the FAQ table (v8 row: 2027-08-31, extension 2027-11-01) and the status board — https://developer.android.com/google/play/billing/deprecation-faq
 - CHANGED: PROTOCOL.md refresh step points at `scripts/rules.py check --online` and Google sources (it named an Apple source and a script that does not exist).
 - Re-baselined ORIGINAL.sha256 to SKILL.md 1.0.1.
+- Re-baselined ORIGINAL.sha256 to SKILL.md 1.0.2 (listing journey, draft apps, Console hand-over rule).

@@ -393,7 +393,8 @@ class Runner:
                         snap[key][t] = self.client.call(mid, {**par, "track": t})
                     except PlayError as e:
                         snap[key][t] = {"_error": e.status}
-            snap["view"] = "includes uncommitted changes of plan " + plan_like["plan_id"] if reused else "committed"
+            snap["view"] = ("includes uncommitted changes of plan " + plan_like["plan_id"] if reused
+                           else "read from Play")
         snap["snapshot_id"] = "sha256:" + __import__("hashlib").sha256(_canon(snap).encode()).hexdigest()[:16]
         snaps = self.kit.path / "private" / "snapshots"
         play_edit.write_atomic(snaps / f"{snap['captured_at'].replace(':', '-')}.json", json.dumps(snap, indent=2))
@@ -401,13 +402,20 @@ class Runner:
         live["listing_languages"] = sorted(x.get("language") for x in snap["listings"] if x.get("language"))
         play_edit.write_atomic(self.kit.path / "console-live.json", json.dumps(live, indent=2) + "\n")
         self.kit.live = live
+        live_release = any(r.get("status") in ("completed", "inProgress", "halted")
+                           for t in snap["tracks"].values() for r in t["releases"])
         if write_kit:
             self._write_tracks(list(snap["tracks"]), snap["captured_at"])
+            if live_release and self.kit.console.get("app_state") == "draft":
+                play_edit.update_yaml_keys(self.kit.path / "console.yaml", {"app_state": "published"})
+                self.kit.console["app_state"] = "published"
         self.out(f"imported {len(snap['tracks'])} track(s): {', '.join(snap['tracks'])} ({snap['view']})")
+        if not live_release and not self.kit.console.get("app_state"):
+            self.out("no track has a live release yet. If Play Console lists this app as Draft, set console.yaml → "
+                     "app_state: draft (a draft app takes only draft releases)")
         return snap
 
     def _write_tracks(self, ids, when):
-        import yaml
         roles = {"production": "production" if "production" in ids else None,
                  "open": "beta" if "beta" in ids else None,
                  "internal": next((t for t in ("qa", "internal") if t in ids), None)}
@@ -416,9 +424,8 @@ class Runner:
         console = dict(self.kit.console)
         console["tracks"] = roles
         console["tracks_imported_at"] = when
-        play_edit.write_atomic(self.kit.path / "console.yaml",
-                               "# Track ids written by `release.py import --write-kit`.\n"
-                               + yaml.safe_dump(console, sort_keys=False, allow_unicode=True))
+        # only the keys import owns; the person's other keys, comments and notes stay as they are
+        play_edit.update_yaml_keys(self.kit.path / "console.yaml", {"tracks": roles, "tracks_imported_at": when})
         self.kit.console = console
 
     # ------------------------------------------------------------------------------------------- plan
@@ -450,6 +457,11 @@ class Runner:
             raise KitExit(EXIT_FINDINGS, "inProgress needs --fraction between 0 and 1")
         if status != "inProgress" and fraction is not None:
             raise KitExit(EXIT_FINDINGS, "--fraction only goes with --status inProgress")
+        if status != "draft" and self.kit.console.get("app_state") == "draft":
+            raise KitExit(EXIT_FINDINGS, "this is a draft app (console.yaml app_state: draft): Play takes only draft "
+                                         "releases until the first one is rolled out from the Console. Plan with "
+                                         "--status draft, then in the Console: Edit release → Next → Save, and "
+                                         "Publishing overview → Send for review")
         if status == "inProgress" and role == "production" and not production_live:
             raise KitExit(EXIT_FINDINGS, "the first production release cannot be a staged rollout: use draft or "
                                          "completed")
@@ -959,8 +971,13 @@ def load_notes(kit, path) -> list[dict]:
 def render_plan(plan) -> str:
     lines = [f"# Play plan {plan['plan_id']}", "", f"Command: **{plan['command']}** · state **{plan['state']}** · "
              f"publishing **{plan.get('publishing_mode')}**", f"Fingerprint `{plan['fingerprint']}`", "",
-             f"Target: `{plan['target']['track_id']}` ({plan['target']['track_role']})",
+             f"Target: `{plan['target']['track_id']}` ({plan['target'].get('track_role', 'store presence')})",
              f"Console scope sent with the commit: {approvals.scope_text(plan)}", ""]
+    if plan["command"] == "listing":
+        lines += ["## Changes", ""] + [f"- {x}" for x in plan["target"]["summary"]]
+        lines += ["", "## Approvals needed", ""] + [f"- **{g}**: {approvals.effect_sentence(plan, g)}"
+                                                     for g in plan["effects"]]
+        return "\n".join(lines) + "\n"
     for a in plan.get("artifacts") or []:
         lines.append(f"Artifact: `{pathlib.Path(a['path']).name}` {a['package']} {a['version_name']} "
                      f"({a['version_code']}) sha256 `{a['sha256'][:16]}…` signer `{str(a.get('signer_sha256'))[:16]}…`")
@@ -980,12 +997,13 @@ def render_plan(plan) -> str:
 
 
 # ------------------------------------------------------------------------------------------------ CLI
-def build_runner(kit, dry_run=False):
+def build_runner(kit, dry_run=False, cls=None):
+    cls = cls or Runner
     if dry_run:
-        return Runner(kit)
+        return cls(kit)
     sa = play_api.resolve_credentials(kit)
     client = play_api.Client(play_api.TokenSource(sa, play_api.urllib_transport))
-    return Runner(kit, client=client, sa=sa)
+    return cls(kit, client=client, sa=sa)
 
 
 def main(argv=None, runner=None):
@@ -1087,6 +1105,8 @@ def main(argv=None, runner=None):
         return EXIT_FINDINGS
     except PlayError as e:
         print(play_api.redact(str(e)), file=sys.stderr)
+        if e.explain():
+            print("likely cause: " + e.explain(), file=sys.stderr)
         return EXIT_GONE if e.status == 404 else EXIT_FINDINGS
 
 

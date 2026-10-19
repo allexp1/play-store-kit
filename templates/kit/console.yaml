@@ -1,6 +1,11 @@
 # What Play Console says about the app. Filled by the person (App integrity) and by `release.py import`.
-developer_account_id: null
+developer_account_id: null       # the number after /developers/ in a Console URL
+console_user_index: null          # the N of /u/N/ when one Google login holds several developer accounts
+app_id: null                      # the number after /app/ in the app's Console URL
 package: com.example.app
+app_state: null                   # draft (never published: Play takes only draft releases) | published
+testing_gate_shown: null          # true when Dashboard -> Production asks for a closed test with 12 testers / 14 days
+automatic_protection: null        # true when Automatic protection stays on (Play adds an installer check)
 service_account_email: null       # the email only; the key file path lives in private/credentials.yaml
 upload_certificate_sha256: null   # App integrity -> Play app signing -> Upload key certificate -> SHA-256
 publishing_mode: unknown          # standard | managed | unknown (read from Publishing overview)

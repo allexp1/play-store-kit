@@ -64,6 +64,34 @@ def write_atomic(path: pathlib.Path, text: str):
     os.replace(tmp, path)
 
 
+def update_yaml_keys(path: pathlib.Path, updates: dict):
+    """Replace only the given top-level keys of a YAML file, keeping every other line and comment as it is.
+
+    A key's block runs from its line to the next top-level line. An inline comment on the key line is kept;
+    a key the file does not have is appended."""
+    import yaml
+    path = pathlib.Path(path)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    for key, value in updates.items():
+        new = yaml.safe_dump({key: value}, sort_keys=False, allow_unicode=True, default_flow_style=False)
+        new = new.rstrip("\n").splitlines()
+        start = next((i for i, ln in enumerate(lines) if ln.split("#", 1)[0].rstrip().startswith(f"{key}:")
+                      and not ln.startswith((" ", "\t"))), None)
+        if start is None:
+            lines += new
+            continue
+        end = start + 1
+        while end < len(lines) and (not lines[end].strip() or lines[end].startswith((" ", "\t", "-"))):
+            end += 1
+        while end > start + 1 and not lines[end - 1].strip():
+            end -= 1                                   # keep blank lines that separate sections
+        if "#" in lines[start]:
+            comment = "  #" + lines[start].split("#", 1)[1]
+            new[0] = new[0] + comment
+        lines[start:end] = new
+    write_atomic(path, "\n".join(lines) + "\n")
+
+
 def load_plan(kit) -> dict:
     path = pathlib.Path(kit) / PLAN_FILE
     if not path.exists():

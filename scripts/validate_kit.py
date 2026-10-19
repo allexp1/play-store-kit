@@ -190,6 +190,14 @@ def check_console(kit, rep, facts):
         rep.error("console.yaml", "service_account_email must be a service account (…iam.gserviceaccount.com)")
     if c.get("publishing_mode") not in (None, *PUBLISHING):
         rep.error("console.yaml", "publishing_mode must be standard, managed or unknown")
+    if c.get("app_state") not in (None, "draft", "published"):
+        rep.error("console.yaml", "app_state must be draft or published")
+    for k in ("testing_gate_shown", "automatic_protection"):
+        if c.get(k) not in (None, True, False):
+            rep.error("console.yaml", f"{k} must be true or false")
+    for k in ("developer_account_id", "app_id", "console_user_index"):
+        if c.get(k) is not None and not str(c[k]).isdigit():
+            rep.error("console.yaml", f"{k} is a number from the Console URL")
     tracks = c.get("tracks") or {}
     imported = c.get("tracks_imported_at")
     ids = [v for k, v in tracks.items() if k != "closed" and v] + list((tracks.get("closed") or {}).values())

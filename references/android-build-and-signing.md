@@ -60,7 +60,15 @@ Since August 2021 new apps must publish as AABs with Play App Signing. There are
 - Keep the keystore and `keystore.properties` out of git (`validate_kit.py` fails if `*.jks`, `*.keystore` or
   `keystore.properties` are tracked). Point Gradle at them through `~/.gradle/gradle.properties` or environment
   variables.
-- The first AAB of a new app is uploaded by the person in the Console; the API cannot create apps.
+- The first AAB of a new app is uploaded by the person in the Console; the API cannot create apps. There is no
+  "accept Play App Signing" step any more: the release form lists enhancements, and "Releases are signed by Google
+  Play" is already on. Check that it is.
+- **Automatic protection.** Create app announces it and the release form lists it as an enhancement: Play adds an
+  installer check to the app's code when it distributes the app, and a copy installed from elsewhere asks people to
+  get the app from Google Play. A "get this app from Play" prompt on a sideloaded or locally installed release build
+  comes from that, not from your code. Record it as `console.yaml → automatic_protection: true`; precheck then shows
+  I-PROTECT (https://support.google.com/googleplay/android-developer/answer/10183279).
+- **Automatic app text translation** is the third enhancement. Leave it off when the app ships human translations.
 
 Generate an upload key (once):
 
@@ -114,6 +122,9 @@ Source: https://developer.android.com/studio/publish/versioning
 - R8/ProGuard: `<module>/build/outputs/mapping/<variant>/mapping.txt` → uploaded as `proguard` for that exact
   versionCode in the same edit, so Play Console and vitals deobfuscate stack traces.
 - Native debug symbols: set `android.buildTypes.release.ndk.debugSymbolLevel = 'SYMBOL_TABLE'` (or `FULL`) and AGP
-  puts them in the AAB; a separate `native-debug-symbols.zip` is uploaded as `nativeCode`.
+  puts them in the AAB under `BUNDLE-METADATA/com.android.tools.build.debugsymbols/`; a separate
+  `native-debug-symbols.zip` is uploaded as `nativeCode`. Without either, Play warns on upload that the bundle has
+  native code without debug symbols, and precheck shows N-SYMBOLS (INFO)
+  (https://developer.android.com/build/include-native-symbols).
 - Paths come from `project.yaml → mapping_path / native_symbols_path`; a missing mapping with minify on is a
   WARNING (and W-DEX from 2027-02-01).

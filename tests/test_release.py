@@ -76,7 +76,7 @@ def test_import_discovers_tracks_and_writes_console(kit, client, sa, fake):
     assert console["tracks"]["production"] == "production" and console["tracks"]["internal"] == "qa"
     assert console["tracks"]["open"] == "beta" and console["tracks_imported_at"]
     live = json.loads((kit / "console-live.json").read_text())
-    assert set(live["tracks"]) == {"production", "beta", "qa"} and live["view"] == "committed"
+    assert set(live["tracks"]) == {"production", "beta", "qa"} and live["view"] == "read from Play"
     assert fake.count("edits.delete") == 1        # the read-only edit is cleaned up
     assert not play_edit.Lock(kit, sa.fingerprint, PKG).read()
 
@@ -471,3 +471,43 @@ def test_cli_dry_run_makes_no_requests(kit, capsys):
 def test_cli_maps_exit_codes(kit, client, sa, fake, tmp_path):
     r = planned(kit, client, sa, fake, tmp_path)
     assert release.main(["apply", str(kit)], runner=r) == 2
+
+
+# ------------------------------------------------------------------------------------------------ draft apps
+def test_draft_app_takes_only_draft_releases(kit, client, sa, fake, tmp_path):
+    fake.add_app(PKG, draft=True)
+    r = imported(kit, client, sa, fake)
+    play_edit.update_yaml_keys(kit / "console.yaml", {"app_state": "draft"})
+    r = runner(kit, client, sa, fake)
+    before = len(fake.calls)
+    with pytest.raises(KitExit) as e:
+        r.cmd_plan(str(aab(tmp_path, 10)), "qa", ["none"], status="completed")
+    assert e.value.code == release.EXIT_FINDINGS and "draft app" in e.value.message
+    assert len(fake.calls) == before
+    r.cmd_plan(str(aab(tmp_path, 10)), "qa", ["none"], status="draft")
+    r = runner(kit, client, sa, fake)
+    r.cmd_apply([receipt(kit, "G-UPLOAD")])
+    assert play_edit.load_plan(kit)["state"] == "applied"
+
+
+def test_fake_refuses_a_completed_release_on_a_draft_app(kit, client, sa, fake, tmp_path):
+    fake.add_app(PKG, draft=True)
+    r = planned(kit, client, sa, fake, tmp_path, status="completed")     # app_state unknown to the kit
+    with pytest.raises(play_api.PlayError) as e:
+        r.cmd_apply([receipt(kit, "G-UPLOAD")])
+    assert "stage the release as draft" in e.value.explain()
+
+
+def test_import_keeps_console_comments_and_other_keys(kit, client, sa, fake):
+    (kit / "console.yaml").write_text(
+        "# my notes about this app\npackage: com.example.app\npublishing_mode: standard   # read 2026-10-19\n"
+        "tracks:                 # ids from import\n  internal: null\n\nupload_certificate_sha256: AB:CD  # App "
+        "integrity\nnotes: keep me\n")
+    imported(kit, client, sa, fake)
+    text = (kit / "console.yaml").read_text()
+    assert text.startswith("# my notes about this app\n")
+    assert "publishing_mode: standard   # read 2026-10-19" in text and "notes: keep me" in text
+    assert "upload_certificate_sha256: AB:CD  # App integrity" in text
+    assert "# ids from import" in text
+    doc = yaml.safe_load(text)
+    assert doc["tracks"]["internal"] == "qa" and doc["tracks_imported_at"]

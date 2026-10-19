@@ -38,6 +38,8 @@ GATES = {
                    "everything listed as pending in Play Console: {scope}.",
     "G-META-PUB": "Release notes{notes_langs} and track changes in this edit go live on approval ({mode} "
                   "publishing). Pending Console changes sent with it: {scope}.",
+    "G-LISTING": "Store presence changes go live on approval ({mode} publishing): {summary}. Pending Console "
+                 "changes sent with it: {scope}.",
     "G-PROD-SUBMIT": "Production release {release} ({status}{fraction}) is sent to Google for review and, under "
                      "{mode} publishing, {publish}. The commit also sends: {scope}.",
     "G-ROLLOUT": "On track {track}, release {release} changes from {before} to {after}{fallback}. "
@@ -85,6 +87,9 @@ def effect_sentence(plan: dict, gate: str) -> str:
         "before": tr.get("before"), "after": tr.get("after"),
         "fallback": f"; release {tr['fallback']} keeps serving everyone else" if tr.get("fallback") else "",
     }
+    fields["summary"] = "; ".join(target.get("summary") or [])
+    if gate == "G-META-PUB" and plan.get("command") == "listing":
+        return GATES["G-LISTING"].format(**fields)    # same gate, worded for listing plans
     return GATES[gate].format(**fields)
 
 

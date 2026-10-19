@@ -9,7 +9,7 @@ locales: [en-US]              # store-listing languages
 free_or_paid: free            # paid -> free is possible once; free -> paid never
 account:
   type: personal              # personal | organization
-  created: null               # YYYY-MM-DD, from Play Console -> Account details
+  created: null               # YYYY-MM-DD if you know it; the Console does not show it (console.yaml testing_gate_shown is the evidence)
   created_after_2023_11_13: null
   organization: null          # legal name for organization accounts (D-U-N-S)
 declarations:                 # true | false | null (unanswered)
@@ -28,6 +28,8 @@ genai:                        # only when declarations.genai is true
   reporting_entry_point: null # where people report AI output in the app
   ad_creatives_reviewed: null
   data_safety_reflects_prompts: null
+app_access:
+  instructions: null          # how a reviewer passes a grown-up / parental gate, if the app has one
 privacy_policy_url: null
 account_deletion_url: null    # web page where people ask to delete their account and data
 target_devices: [phone, tablet]   # phone, tablet, wear, tv, auto, xr

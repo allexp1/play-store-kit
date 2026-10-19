@@ -81,3 +81,29 @@ def test_client_urls_match_discovery(discovery):
     url = c.url("edits.bundles.upload", {"packageName": "p", "editId": "e"}, {"uploadType": "resumable"},
                 protocol="resumable")
     assert url == "https://androidpublisher.googleapis.com/resumable/upload/androidpublisher/v3/applications/p/edits/e/bundles?uploadType=resumable"
+
+
+def test_store_presence_methods(discovery):
+    edits = discovery["resources"]["edits"]["resources"]
+    assert {"update", "patch", "list", "get"} <= set(edits["listings"]["methods"])
+    assert {"update", "get"} <= set(edits["details"]["methods"])
+    assert {"update", "get"} <= set(edits["testers"]["methods"])
+    up = edits["images"]["methods"]["upload"]
+    assert "image/*" in up["mediaUpload"]["accept"]
+    types = up["parameters"]["imageType"]["enum"]
+    for t in ("icon", "featureGraphic", "phoneScreenshots", "sevenInchScreenshots", "tenInchScreenshots"):
+        assert t in types
+    assert "deleteall" in edits["images"]["methods"]
+    # Country availability can only be read through the API; countries are set in the Console.
+    assert set(edits["countryavailability"]["methods"]) == {"get"}
+
+
+def test_one_time_products_use_the_monetization_api(discovery):
+    import play_api
+
+    otp = discovery["resources"]["monetization"]["resources"]["onetimeproducts"]["methods"]
+    assert otp["batchUpdate"]["flatPath"].endswith("/oneTimeProducts:batchUpdate")
+    # camelCase everywhere except patch, whose flatPath is lowercase
+    assert "/onetimeproducts/" in otp["patch"]["flatPath"]
+    assert "convertRegionPrices" in discovery["resources"]["monetization"]["methods"]
+    assert not any(mid.startswith("inappproducts.") for mid in play_api.CONTRACT)

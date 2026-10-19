@@ -89,6 +89,7 @@ class ArtifactRecord:
     build_id: str | None = None
     mapping_path: str | None = None
     native_symbols_path: str | None = None
+    bundled_debug_symbols: bool = False   # BUNDLE-METADATA/com.android.tools.build.debugsymbols/ present
     manifest_source: str = "bundletool"
     notes: list[str] = dataclasses.field(default_factory=list)
 
@@ -276,6 +277,8 @@ def inspect(aab, tool: Bundletool | None = None, size=False, mapping=None, nativ
                               if "/" in n and not n.startswith(("META-INF/", "BUNDLE-METADATA/"))
                               and n.split("/", 1)[0] not in ("BundleConfig.pb",)})
         rec.native_libs = _native_libs(zf)
+        rec.bundled_debug_symbols = any(n.startswith("BUNDLE-METADATA/com.android.tools.build.debugsymbols/")
+                                        for n in zf.namelist())
         rec.abis = sorted({lib.abi for lib in rec.native_libs})
         dex = [zf.read(n) for n in zf.namelist() if re.match(r"^[^/]+/dex/[^/]+\.dex$", n)]
         rec.dex_total_bytes = sum(len(d) for d in dex)

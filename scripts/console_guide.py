@@ -7,7 +7,9 @@
   python3 scripts/console_guide.py KIT steps [--json]           # step ids and their progress
 
 Every step names who does it, the values to paste (from facts.yaml / console.yaml) and its Help page. The kit never
-signs in, never types legal, identity or payment answers and never presses Create, Save, Publish or Apply.
+signs in, never types legal, identity or payment answers and never presses Create, Save, Publish or Apply. Steps that
+grant permissions, accept terms or confirm a release are the person's: the agent may fill a form, the person presses
+the button.
 Progress lives in KIT/console-progress.yaml; only `observed` (with a date and the Console URL it was seen on) turns a
 status-board row green, `attested` shows ✋ with the date. `--private` also writes
 KIT/private/console-guide.private.html with the reviewer credentials from private/app-access.yaml (never in the .md).
@@ -41,63 +43,194 @@ def _v(x, missing="❓ (answer in facts.yaml)"):
     return missing if x in (None, "", []) else x
 
 
-def steps(facts: dict, console: dict) -> list[dict]:
+def console_urls(console: dict) -> dict:
+    """Console links built from console.yaml (developer_account_id, console_user_index, app_id); {} when unknown.
+
+    One Google login can hold several developer accounts; /u/N/ picks the login, /developers/ID the account."""
+    dev, n, app = console.get("developer_account_id"), console.get("console_user_index"), console.get("app_id")
+    if not dev:
+        return {}
+    base = f"https://play.google.com/console/u/{n if n is not None else 0}/developers/{dev}"
+    out = {"home": base, "users": base + "/users-and-permissions"}
+    if app:
+        out.update(dashboard=f"{base}/app/{app}/app-dashboard", integrity=f"{base}/app/{app}/keymanagement")
+    return out
+
+
+def _open(urls, key):
+    return f" Open: {urls[key]}" if key in urls else ""
+
+
+def load_precheck(kit) -> dict:
+    p = pathlib.Path(kit) / "precheck.json"
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
+def app_access_text(facts: dict) -> str:
+    """What to answer on App access, derived from facts (no accounts, a grown-up gate, paid content, sign-in)."""
+    d = facts.get("declarations") or {}
+    gate = (facts.get("app_access") or {}).get("instructions")
+    if d.get("account_creation"):
+        return ("**Some functionality is restricted**: add reviewer sign-in for every gated area (kept in "
+                "private/app-access.yaml, shown only by `render --private`)"
+                + (", including accounts that unlock every AI feature" if d.get("genai") else "")
+                + (f". Gate instructions: {gate}" if gate else ""))
+    if d.get("digital_goods"):
+        return ("**Some functionality is restricted**: Google counts content behind a one-time product as "
+                "restricted, so \"all functionality available\" is wrong here. Give the gate instructions"
+                + (f" ({gate})" if gate else " (facts.yaml → app_access.instructions)")
+                + " and one promo code per product (step `promo-codes`), within 500 characters. Untick \"allow "
+                  "Google to use these details for testing on trusted partner devices\" (on by default), or "
+                  "partner testing can use up the codes before the reviewer does")
+    if gate:
+        return f"**Some functionality is restricted**: no sign-in; gate instructions: {gate}"
+    if d.get("account_creation") is False:
+        return "**All functionality is available without special access**"
+    return "❓ (answer declarations.account_creation and digital_goods in facts.yaml)"
+
+
+def steps(facts: dict, console: dict, pre: dict | None = None) -> list[dict]:
     """The ordered Console steps (§12.1–§12.3) with the values the person needs."""
+    pre = pre or {}
     d = facts.get("declarations") or {}
     acct = facts.get("account") or {}
     pkg = facts.get("package") or console.get("package")
     org = acct.get("type") == "organization"
     regulated = [k for k in ("financial", "health", "government", "vpn") if d.get(k)]
     sa = console.get("service_account_email") or "<service-account>@<project>.iam.gserviceaccount.com"
+    urls = console_urls(console)
+    sells = d.get("digital_goods") or pre.get("billing")
     yes_no = lambda k: {True: "Yes", False: "No"}.get(d.get(k), "❓ (answer declarations." + k + ")")  # noqa: E731
+    perms = pre.get("permission_declarations") or []
+    signer = pre.get("signer_sha256")
+    aab = pre.get("aab")
     out = [
+        dict(id="developer-account", section="bootstrap", who="owner", title="Pick the developer account",
+             do="If the Console opens on \"Choose developer account\", pick the one that will own the app. Copy "
+                "the number after /developers/ into console.yaml → developer_account_id and the N of /u/N/ into "
+                "console_user_index; every Console link in this guide is built from them (now: **"
+                + (urls.get("home") or "not recorded") + "**).",
+             url=HELP + "6112435"),
         dict(id="account", section="bootstrap", who="owner", title="Create the developer account",
              do=f"Account type: **{_v(acct.get('type'))}**"
                 + (" (organization: needs a D-U-N-S number)" if org else "")
                 + ". 18+, accept the Developer Distribution Agreement, pay the US$25 registration fee, verify "
-                  "identity (and a device, for new personal accounts)."
+                  "identity (and a device, for new personal accounts). The Console does not show the account's "
+                  "creation date; the testing gate is read from the app's Dashboard instead (step `testing-gate`)."
                 + (f" Your declarations ({', '.join(regulated)}) need an organization account." if regulated and not org
                    else ""),
              url=HELP + "6112435"),
         dict(id="verification", section="bootstrap", who="owner", title="Developer verification and package registration",
-             do=f"Console Home → follow the verification task; register the package **{pkg}** when asked.",
+             do=f"Console Home → follow the verification task; register the package **{pkg}** when asked. Then "
+                "`mark verification --state observed --url …` (precheck W-VERIFY reads it).",
              url="https://developer.android.com/developer-verification"),
         dict(id="create-app", section="bootstrap", who="owner", title="Create the app",
              do=f"Home → Create app. App name **{_v(facts.get('app_name'))}**, default language "
                 f"**{_v(facts.get('default_locale'))}**, **{_v(facts.get('category_type'))}**, "
                 f"**{_v(facts.get('free_or_paid'))}** (a paid app can become free once; a free app can never become "
-                "paid). Accept the declarations; you press Create.",
+                f"paid). Package name **{_v(pkg)}**: press Check availability before Create; it can never change. "
+                "The form announces Automatic protection (an installer check added to the app; sideloaded copies "
+                "ask people to get it from Google Play): set console.yaml → automatic_protection: true if it stays "
+                "on. Accept the declarations; you press Create. Then set console.yaml → app_state: draft and "
+                "app_id (the number after /app/ in the URL).",
              url=HELP + "9859152"),
-        dict(id="app-content", section="bootstrap", who="owner", title="App content (Policy → App content)",
-             do="Privacy policy URL **" + str(_v(facts.get("privacy_policy_url"))) + "**; Ads **" + yes_no("ads")
-                + "**; App access: reviewer sign-in (kept in private/app-access.yaml; `render --private`)"
-                + (", including accounts that unlock every AI feature" if d.get("genai") else "")
-                + "; Target audience" + (" (children: Families policy applies)" if d.get("children_audience") else "")
-                + "; News; Government **" + yes_no("government") + "**; Financial features **" + yes_no("financial")
-                + "**; Health **" + yes_no("health") + "**; Advertising ID **" + yes_no("advertising_id")
-                + "**; Data safety; Content rating (IARC questionnaire)."
-                + (" Account deletion URL **" + str(_v(facts.get("account_deletion_url"))) + "**."
-                   if d.get("account_creation") else ""),
-             url=HELP + "9859455"),
+        dict(id="testing-gate", section="bootstrap", who="owner", title="Read the testing gate on the Dashboard",
+             do="App → Dashboard → Production. If it says to run a closed test with at least 12 testers for at "
+                "least 14 days, set console.yaml → testing_gate_shown: true (else false). This is the evidence "
+                "precheck uses; the account date is not needed." + _open(urls, "dashboard"),
+             url=HELP + "14151465"),
+        dict(id="store-listing", section="bootstrap", who="owner", title="Main store listing",
+             do="Store presence → Main store listing (search \"Store listing\"): title, short and full description, "
+                "icon 512×512, feature graphic 1024×500, phone and tablet screenshots; limits in `play-specs.md`. "
+                "`listing.py KIT lint` checks texts first. With the service account's \"Edit and delete draft "
+                "apps\" permission, `listing.py` stages it through the API; without it, use the Console editor: "
+                "language chip → Manage languages → tick each language by its label → Apply, then Next language "
+                "through the translations and Save once. Images an earlier API edit uploaded are already in the "
+                "Console's asset library (\"Asset was deduplicated\"); screenshot order is not kept, check it.",
+             url=HELP + "9866151"),
+        dict(id="store-settings", section="bootstrap", who="owner", title="Store settings",
+             do=f"Category **{_v(facts.get('category'))}**, tags, contact email and website.",
+             url=HELP + "9859673"),
+    ]
+    if sells:
+        out.append(dict(
+            id="payments-profile", section="bootstrap", who="owner", title="Payments profile and merchant account",
+            do="Monetize with Play → Monetization setup → set up a Google Payments merchant account and wait for "
+               "verification. Until it is verified, products cannot be created and every monetization API call "
+               "answers 403; App access, Target audience and Data safety wait on it too (promo codes need products).",
+            url=HELP + "7161426"))
+    content = ("Privacy policy URL **" + str(_v(facts.get("privacy_policy_url"))) + "**; Ads **" + yes_no("ads")
+               + "**; News; Government **" + yes_no("government") + "**; Financial features **"
+               + yes_no("financial") + "**; Health **" + yes_no("health") + "**; Advertising ID **"
+               + yes_no("advertising_id") + "**."
+               + (" Account deletion URL **" + str(_v(facts.get("account_deletion_url"))) + "**."
+                  if d.get("account_creation") else ""))
+    if perms:
+        content += " Permission declarations precheck found: **" + "**, **".join(perms) + "**."
+    out += [
+        dict(id="app-content", section="bootstrap", who="owner", title="App content",
+             do="App content (search \"App content\"): " + content, url=HELP + "9859455"),
+        dict(id="app-access", section="bootstrap", who="owner", title="App access (Sign in details)",
+             do=app_access_text(facts), url=HELP + "9859455"),
+        dict(id="target-audience", section="bootstrap", who="owner", title="Target audience and content",
+             do=("Age groups from the app's audience. Children: you tick the COPPA / GDPR certification yourself "
+                 "(a legal attestation the agent never makes); the under-13 notice is an acknowledgement. Families "
+                 "policy: only Families self-certified ad and analytics SDKs; Teacher Approved is a separate opt-in "
+                 "review offered after saving. Saving puts the app in Designed for Families."
+                 if d.get("children_audience") else
+                 "Age groups; choosing under 13 brings the Families policy." if d.get("children_audience") is False
+                 else "❓ (answer declarations.children_audience) Age groups; under 13 brings the Families policy."),
+             url=HELP + "9867159"),
         dict(id="data-safety", section="bootstrap", who="owner", title="Data safety form",
-             do="Declare what the app and every packaged SDK collect or share (precheck lists the SDKs it found).",
+             do="Declare what the app and every packaged SDK collect or share (precheck lists the SDKs it found)."
+                + (" It can only be saved after Target audience; it then asks whether to show \"Committed to "
+                   "follow the Play Families Policy\"." if d.get("children_audience") else ""),
              url=HELP + "10787469"),
         dict(id="content-rating", section="bootstrap", who="owner", title="Content rating",
              do="Fill the IARC questionnaire with an email you read; ratings appear per region.",
              url=HELP + "9859655"),
-        dict(id="store-settings", section="bootstrap", who="owner", title="Store settings",
-             do=f"Category **{_v(facts.get('category'))}**, tags, contact email and website.",
-             url=HELP + "9859673"),
         dict(id="first-upload", section="bootstrap", who="owner", title="Upload the first signed AAB in the Console",
-             do="Test and release → Testing → Internal testing → Create new release → accept Play App Signing → "
-                "upload the AAB that `precheck.py` passed. The API cannot work on an app until this first upload "
-                "exists; the kit never tries.",
+             do="Test and release → Testing → Internal testing → Create new release. Check the enhancements show "
+                "\"Releases are signed by Google Play\" (Play App Signing; nothing to accept any more). Leave "
+                "automatic app text translation off when the app ships its own translations. Drag the AAB that "
+                "`precheck.py` passed onto the upload area yourself (browser helpers cannot attach files this "
+                "large)" + (f": `open -R \"{aab}\"` shows it in Finder" if aab else "") + ". Save. The release "
+                "stays a draft: the API cannot work on the app before this upload, and a draft app takes only "
+                "draft releases.",
              url=HELP + "9842756"),
-        dict(id="upload-cert", section="bootstrap", who="owner", title="Record the upload certificate",
-             do="Test and release → App integrity → Play app signing → Upload key certificate → copy the SHA-256 "
-                "into console.yaml → upload_certificate_sha256 (current: **"
-                + str(_v(console.get("upload_certificate_sha256"), "not recorded")) + "**).",
+        dict(id="upload-cert", section="bootstrap", who="owner", title="Check the upload certificate",
+             do="Test and release → App integrity → Play app signing → Upload key certificate → SHA-256."
+                + (f" It should read **{_colons(signer)}** (the signer of the AAB precheck read); if it shows "
+                   "something else, stop." if signer else "")
+                + " Copy it into console.yaml → upload_certificate_sha256 (current: **"
+                + str(_v(console.get("upload_certificate_sha256"), "not recorded")) + "**)." + _open(urls, "integrity"),
              url=HELP + "9842756"),
+    ]
+    if sells:
+        out += [
+            dict(id="in-app-products", section="bootstrap", who="owner", title="Create the in-app products",
+                 do="Monetize with Play → Products → One-time products. Possible only after an AAB with the BILLING "
+                    "permission is uploaded (`first-upload`) and the merchant account is verified. Through the "
+                    "API only the monetization methods work (pricing:convertRegionPrices → "
+                    "oneTimeProducts:batchUpdate → purchaseOptions:batchUpdateStates); product sync arrives in 1.2.",
+                 url=HELP + "1153481"),
+            dict(id="promo-codes", section="bootstrap", who="owner", title="Promo codes for the reviewer",
+                 do="Monetize with Play → Promo codes. The first visit asks you to accept the Promo codes terms "
+                    "(your call). One promotion per product (the purchase-option picker takes one): name ≤ 60 "
+                    "characters, a start time later than now, an end date, a code count (500 a quarter across "
+                    "non-subscription promotions). Each Save downloads promotion_codes (N).csv to Downloads in save "
+                    "order: move them to private/ and note which product each is. One code per product goes into "
+                    "App access.",
+                 url=HELP + "6321495"),
+        ]
+    out += [
+        dict(id="send-for-review", section="bootstrap", who="owner", title="Confirm the release and send for review",
+             do="Test and release → the draft release → Edit release → Next (Preview and confirm) → Save. Until "
+                "then Publishing overview keeps \"Send app for review\" greyed out. Then Publishing overview → "
+                "Send app for review; \"Running quick checks\" takes up to about 14 minutes, then the changes go "
+                "to review by themselves. You press these buttons. Afterwards `release.py import KIT --write-kit` "
+                "sets app_state to published once a release is live.",
+             url=HELP + "9859751"),
         dict(id="cloud-api", section="service-account", who="owner", title="Enable the API in a Google Cloud project",
              do="Google Cloud console → APIs & Services → enable **Google Play Android Developer API** "
                 "(and **Google Play Developer Reporting API** only if you want vitals).",
@@ -107,20 +240,28 @@ def steps(facts: dict, console: dict) -> list[dict]:
                 "outside the repository and put its path in private/credentials.yaml → service_account_json. "
                 "Never paste the key into chat.",
              url="https://developers.google.com/android-publisher/getting_started"),
-        dict(id="invite", section="service-account", who="owner", title="Grant app-level Play permissions",
-             do=f"Play Console → Users and permissions → Invite new users → **{sa}** → App permissions → **{pkg}** "
-                "only: View app information (read-only); Release apps to testing tracks; Manage testing tracks and "
-                "edit tester lists; and Release to production, exclude devices, and use Play App Signing only if "
-                "the kit should send production releases. Cloud IAM roles do not grant Play access.",
+        dict(id="invite", section="service-account", who="owner", title="Invite the service account (you do all of it)",
+             do=f"Users and permissions → Invite new users → **{sa}** → App permissions → **{pkg}** only. Tick: "
+                "Release to testing tracks; Manage testing tracks and edit tester lists; Manage store presence; "
+                "Release to production, exclude devices, and use Play App Signing (only if the kit should send "
+                "production releases); **Edit and delete draft apps** (Draft apps; needed for listing, details and "
+                "tester changes while the app is a draft)"
+                + ("; View financial data, and Manage orders and subscriptions, for products" if sells else "")
+                + ". You tick the boxes and press Invite: an agent must not grant permissions. Cloud IAM roles do "
+                  "not grant Play access. Then check the result with `play_api.py connect KIT`, not by opening "
+                  "the form." + _open(urls, "users"),
              url=HELP + "9844686"),
         dict(id="connect", section="service-account", who="kit", title="Check what the key can do",
              do="`python3 scripts/play_api.py connect KIT` writes the capability matrix to console-live.json; then "
-                "`release.py import KIT` discovers the track ids.",
+                "`release.py import KIT --write-kit` discovers the track ids. A 403 at validate after store-presence "
+                "changes means the Draft apps permission is missing; permission changes take a few minutes.",
              url="https://developers.google.com/android-publisher/getting_started"),
         dict(id="closed-track", section="testing", who="owner", title="Create a closed testing track and testers",
              do="Test and release → Testing → Closed testing → Create track (or `release.py tracks KIT create`). Add "
                 "testers as a Google Group or an email list; share the opt-in link. Testers on the internal track "
-                "do not count and must leave it to receive closed builds.",
+                "do not count and must leave it to receive closed builds. Countries are set only in the Console "
+                "(the track → Countries / regions; the API can read them, not set them). A new track starts in "
+                "sync with production; tester services often ask for India. You tick the boxes and Save.",
              url=HELP + "9845334"),
         dict(id="testing-evidence", section="testing", who="owner", title="Record opted-in testers, dated",
              do="Every few days read the Opted-in count on the closed track's Testers tab and run "
@@ -133,6 +274,16 @@ def steps(facts: dict, console: dict) -> list[dict]:
              url=HELP + "14151465"),
     ]
     return out
+
+
+def _colons(sha):
+    h = str(sha).replace(":", "").upper()
+    return ":".join(h[i:i + 2] for i in range(0, len(h), 2))
+
+
+def all_step_ids() -> set[str]:
+    """Every step id, including the ones that appear only for some apps."""
+    return {s["id"] for s in steps({"declarations": {"digital_goods": True}}, {})}
 
 
 def production_access_draft(kit, facts) -> str:
@@ -173,7 +324,7 @@ def save_progress(kit, prog):
 
 
 def mark(kit, step_id, state, url=None, note=None, today=None):
-    ids = {s["id"] for s in steps({}, {})}
+    ids = all_step_ids()
     if step_id not in ids:
         raise SystemExit(f"unknown step {step_id!r}; one of: {', '.join(sorted(ids))}")
     if state == "observed" and not (url and url.startswith("https://play.google.com/console")):
@@ -196,6 +347,10 @@ def _ctx(kit):
     return kit, build.load_yaml(kit / "facts.yaml") or {}, build.load_yaml(kit / "console.yaml") or {}
 
 
+def _steps_for(kit, facts, console):
+    return steps(facts, console, load_precheck(kit))
+
+
 def render_section(kit, name) -> str:
     kit, facts, console = _ctx(kit)
     if name == "production-access":
@@ -203,7 +358,7 @@ def render_section(kit, name) -> str:
     prog = load_progress(kit)
     lines = [f"## {SECTIONS[name]}", ""]
     n = 0
-    for s in steps(facts, console):
+    for s in _steps_for(kit, facts, console):
         if s["section"] != name:
             continue
         n += 1
@@ -256,7 +411,7 @@ def main(argv=None):
         _, facts, console = _ctx(kit)
         prog = load_progress(kit)
         rows = [{"id": s["id"], "section": s["section"], "who": s["who"], "title": s["title"],
-                 **(prog.get(s["id"]) or {"state": "todo"})} for s in steps(facts, console)]
+                 **(prog.get(s["id"]) or {"state": "todo"})} for s in _steps_for(kit, facts, console)]
         print(json.dumps(rows, indent=2) if a.json else
               "\n".join(f"{MARK[r['state']]} {r['id']:<18} {r['title']}" for r in rows))
     else:

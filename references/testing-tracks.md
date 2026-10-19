@@ -17,7 +17,10 @@ https://support.google.com/googleplay/android-developer/answer/9845334
   internal track gets internal builds and must leave that track to receive closed builds. The opt-in link appears once
   the testing release is available.
 - **Countries.** Production, open and closed tracks can target countries (synced with production by default); internal
-  testing cannot (https://support.google.com/googleplay/android-developer/answer/7550024).
+  testing cannot (https://support.google.com/googleplay/android-developer/answer/7550024). The API only reads them
+  (`edits.countryavailability.get`; a new closed track shows `syncWithProduction: true`); set them on the track's
+  Countries / regions page. Paid tester services often ask for India. The person ticks the boxes and presses Save;
+  the kit checks the result afterwards.
 - **Pre-launch report.** Runs on upload or when a production release is saved: stability, compatibility, performance,
   accessibility on Android 9+ phones, tablets, Wear and Chromebooks; results usually within an hour; up to 3 deep
   links; give it a dedicated test account in its settings
@@ -38,6 +41,11 @@ Applies to **personal** accounts created **after 2023-11-13**
 
 Google does not address organization accounts on that page; the kit treats them as exempt unless the Dashboard shows an
 eligibility task (record it as console evidence).
+
+**Which applies is read from the Dashboard, not from a date.** The Console shows no account creation date (Developer
+account → About you lists type, ID, name, owner, address and website). A new app's Dashboard → Production says "Run
+your closed test with at least 12 testers, for at least 14 days" with the opted-in count when the gate applies. Record
+it as `console.yaml → testing_gate_shown: true` (or `false`); precheck uses it ahead of `facts.yaml → account.created`.
 
 ### Evidence procedure
 

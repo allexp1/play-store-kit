@@ -59,8 +59,13 @@ def _routes():
 
 
 class App:
-    def __init__(self, package, tracks, bundles, publishing):
+    def __init__(self, package, tracks, bundles, publishing, draft=False):
         self.package = package
+        self.draft = draft              # never published: Play accepts only draft releases
+        self.draft_permission = True    # the principal holds "Edit and delete draft apps"
+        self.listings: dict[str, dict] = {}
+        self.details: dict = {}
+        self.images: dict[tuple[str, str], list[str]] = {}
         self.tracks = tracks
         self.bundles = bundles          # [{"versionCode": int, "sha256": str, "sha1": str}]
         self.publishing = publishing
@@ -92,12 +97,12 @@ class FakePlay:
     def advance(self, seconds):
         self.clock += seconds
 
-    def add_app(self, package, tracks=None, bundles=None, publishing="standard"):
+    def add_app(self, package, tracks=None, bundles=None, publishing="standard", draft=False):
         tracks = tracks if tracks is not None else {"production": {"releases": []}, "beta": {"releases": []},
                                                      "qa": {"releases": []}}
         tracks = {name: {"track": name, "releases": copy.deepcopy(t.get("releases", []))}
                   for name, t in tracks.items()}
-        self.apps[package] = App(package, tracks, list(bundles or []), publishing)
+        self.apps[package] = App(package, tracks, list(bundles or []), publishing, draft)
         app = self.apps[package]
         for name, t in tracks.items():
             for r in t["releases"]:
@@ -243,7 +248,9 @@ class FakePlay:
             eid = f"edit-{next(self._ids)}"
             self.edits[eid] = {"id": eid, "package": app.package, "state": "open",
                                "expiry": self.clock + self.edit_lifetime, "tracks": copy.deepcopy(app.tracks),
-                               "bundles": [], "deobfuscation": []}
+                               "bundles": [], "deobfuscation": [], "listings": copy.deepcopy(app.listings),
+                               "details": copy.deepcopy(app.details), "images": copy.deepcopy(app.images),
+                               "store_changed": False}
             return _ok({"id": eid, "expiryTimeSeconds": str(int(self.clock + self.edit_lifetime))})
         if mid == "edits.get":
             # An invalidated edit still exists; only validate and commit fail (RESEARCH §3.2).
@@ -256,6 +263,8 @@ class FakePlay:
         if mid == "edits.get":
             return _ok({"id": edit["id"], "expiryTimeSeconds": str(int(edit["expiry"]))})
         if mid == "edits.validate":
+            if edit["store_changed"] and app.draft and not app.draft_permission:
+                return _err(403, "The caller does not have permission", "PERMISSION_DENIED")
             return _ok({"id": edit["id"], "expiryTimeSeconds": str(int(edit["expiry"]))})
         if mid == "edits.delete":
             edit["state"] = "deleted"
@@ -290,8 +299,34 @@ class FakePlay:
             return _ok({"deobfuscationFile": {"symbolType": params["deobfuscationFileType"]}})
         if mid == "edits.commit":
             return self._commit(app, edit, query)
-        if mid in ("edits.listings.list", "edits.details.get", "edits.testers.get",
-                   "edits.countryavailability.get", "edits.images.list"):
+        if mid == "edits.listings.list":
+            return _ok({"listings": [copy.deepcopy(v) for _, v in sorted(edit["listings"].items())]})
+        if mid == "edits.listings.update":
+            title = data.get("title") or ""
+            if len(title) > 30:
+                return _err(400, "Title is too long.", "INVALID_ARGUMENT")
+            edit["listings"][params["language"]] = {**data, "language": params["language"]}
+            edit["store_changed"] = True
+            return _ok(edit["listings"][params["language"]])
+        if mid == "edits.details.get":
+            return _ok(copy.deepcopy(edit["details"]))
+        if mid == "edits.details.update":
+            edit["details"] = dict(data)
+            edit["store_changed"] = True
+            return _ok(edit["details"])
+        if mid == "edits.images.deleteall":
+            gone = edit["images"].pop((params["language"], params["imageType"]), [])
+            edit["store_changed"] = True
+            return _ok({"deleted": [{"id": i} for i in gone]})
+        if mid == "edits.images.upload":
+            if params["_protocol"] == "resumable":
+                return self._initiate(mid, edit, headers, query, extra=params)
+            return self._finish_image(edit, params, body or b"")
+        if mid == "edits.testers.update":
+            edit.setdefault("testers", {})[params["track"]] = dict(data)
+            edit["store_changed"] = True
+            return _ok(data)
+        if mid in ("edits.testers.get", "edits.countryavailability.get", "edits.images.list"):
             return _ok({})
         raise AssertionError(f"FakePlay: {mid} not modelled")
 
@@ -303,6 +338,8 @@ class FakePlay:
             status, fraction = r.get("status"), r.get("userFraction")
             if status not in ("draft", "inProgress", "halted", "completed"):
                 return _err(400, f"Invalid release status {status!r}.", "INVALID_ARGUMENT")
+            if app.draft and status != "draft":
+                return _err(400, "Only releases with status draft may be created on draft app.", "INVALID_ARGUMENT")
             if fraction is not None and (status not in ("inProgress", "halted") or not 0 < fraction < 1):
                 return _err(400, "userFraction is only allowed for inProgress or halted releases, between 0 and 1.",
                             "INVALID_ARGUMENT")
@@ -336,8 +373,12 @@ class FakePlay:
                 app.lifecycle[key] = LIFECYCLE + ("DRAFT" if r.get("status") == "draft" else "IN_REVIEW")
                 if name == "production" and r.get("status") == "completed":
                     app.production_ever_published = True
+        if edit["store_changed"] and app.draft and not app.draft_permission:
+            return _err(403, "The caller does not have permission", "PERMISSION_DENIED")
         app.tracks = copy.deepcopy(edit["tracks"])
         app.bundles += edit["bundles"]
+        app.listings, app.details = copy.deepcopy(edit["listings"]), copy.deepcopy(edit["details"])
+        app.images = copy.deepcopy(edit["images"])
         edit["state"] = "committed"
         if changed and any(s == LIFECYCLE + "IN_REVIEW" for s in app.lifecycle.values()):
             app.review_open = True
@@ -389,12 +430,20 @@ class FakePlay:
             edit = self.edits[s["edit"]]
             if s["method"] == "edits.bundles.upload":
                 s["done"] = self._finish_bundle(self.apps[edit["package"]], edit, s["data"])
+            elif s["method"] == "edits.images.upload":
+                s["done"] = self._finish_image(edit, s["extra"], s["data"])
             else:
                 edit["deobfuscation"].append(s["extra"].get("apkVersionCode"))
                 s["done"] = _ok({"deobfuscationFile": {"symbolType": s["extra"].get("deobfuscationFileType")}})
             return s["done"]
         hdrs = {"Range": f"bytes=0-{len(s['data']) - 1}"} if s["data"] else {}
         return 308, hdrs, b""
+
+    def _finish_image(self, edit, params, data):
+        sha = hashlib.sha256(data).hexdigest()
+        edit["images"].setdefault((params["language"], params["imageType"]), []).append(sha)
+        edit["store_changed"] = True
+        return _ok({"image": {"id": sha[:12], "sha256": sha, "url": "https://play-lh.example/" + sha[:12]}})
 
     def _finish_bundle(self, app, edit, data):
         m = re.search(rb"versionCode=(\d+)", data)

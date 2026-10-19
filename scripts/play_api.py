@@ -80,19 +80,39 @@ CONTRACT = {
         "applications/{packageName}/edits/{editId}/apks/{apkVersionCode}/deobfuscationFiles/{deobfuscationFileType}",
         "reconcilable", ("simple", "resumable")),
     "edits.listings.list": ("GET", "applications/{packageName}/edits/{editId}/listings", "read", None),
+    "edits.listings.get": ("GET", "applications/{packageName}/edits/{editId}/listings/{language}", "read", None),
+    "edits.listings.update": ("PUT", "applications/{packageName}/edits/{editId}/listings/{language}", "idempotent",
+                              None),
     "edits.images.list": ("GET", "applications/{packageName}/edits/{editId}/listings/{language}/{imageType}",
                           "read", None),
+    "edits.images.deleteall": ("DELETE", "applications/{packageName}/edits/{editId}/listings/{language}/{imageType}",
+                               "idempotent", None),
+    "edits.images.upload": ("POST", "applications/{packageName}/edits/{editId}/listings/{language}/{imageType}",
+                            "reconcilable", ("simple", "resumable")),
     "edits.details.get": ("GET", "applications/{packageName}/edits/{editId}/details", "read", None),
+    "edits.details.update": ("PUT", "applications/{packageName}/edits/{editId}/details", "idempotent", None),
     "edits.testers.get": ("GET", "applications/{packageName}/edits/{editId}/testers/{track}", "read", None),
+    "edits.testers.update": ("PUT", "applications/{packageName}/edits/{editId}/testers/{track}", "idempotent", None),
     "edits.countryavailability.get": ("GET", "applications/{packageName}/edits/{editId}/countryAvailability/{track}",
                                       "read", None),
     "applications.tracks.releases.list": ("GET", "applications/{packageName}/tracks/{track}/releases", "read", None),
+    # One-time products: only the monetization API. The legacy inappproducts methods answer 403 "Please migrate to
+    # the new publishing API" for new apps, so the kit never calls them.
+    "monetization.onetimeproducts.list": ("GET", "applications/{packageName}/oneTimeProducts", "read", None),
+    "monetization.onetimeproducts.batchUpdate": ("POST", "applications/{packageName}/oneTimeProducts:batchUpdate",
+                                                 "reconcilable", None),
+    "monetization.onetimeproducts.purchaseOptions.batchUpdateStates": (
+        "POST", "applications/{packageName}/oneTimeProducts/{productId}/purchaseOptions:batchUpdateStates",
+        "reconcilable", None),
+    "monetization.convertRegionPrices": ("POST", "applications/{packageName}/pricing:convertRegionPrices", "read",
+                                         None),
 }
 # query parameters the kit sends, per method (checked against the discovery document)
 QUERY = {
     "edits.commit": ("changesInReviewBehavior",),
     "edits.bundles.upload": ("uploadType",),
     "edits.deobfuscationfiles.upload": ("uploadType",),
+    "edits.images.upload": ("uploadType",),
 }
 
 
@@ -118,6 +138,25 @@ class PlayError(Exception):
     def has(self, *needles):
         text = json.dumps(self.body) + " " + self.reason + " " + self.message
         return any(n in text for n in needles)
+
+    def explain(self, method_id=""):
+        """The likely cause of a refusal, in the person's terms, or "" when the error speaks for itself."""
+        mid = method_id or self.method
+        if self.status == 403 and self.has("migrate to the new publishing API"):
+            return ("the legacy in-app products API is closed for this app: use monetization.onetimeproducts "
+                    "(the kit never calls inappproducts)")
+        if self.status == 403 and ("monetization" in mid or "pricing" in mid or "oneTimeProducts" in self.path
+                                   or "pricing:" in self.path):
+            return ("set up a Google Payments merchant account first (Monetize with Play → Monetization setup); "
+                    "until it is verified every monetization call answers 403")
+        if self.status == 403 and "validate" in (mid + self.path):
+            return ("a draft app needs the service account's 'Edit and delete draft apps' permission (Users and "
+                    "permissions → the app → Draft apps) for listing, details and tester changes; release-only "
+                    "edits validate without it")
+        if self.status == 400 and self.has("Only releases with status draft may be created on draft app"):
+            return ("the app has never been published: stage the release as draft, then roll it out in the Console "
+                    "(Edit release → Next → Save, then Publishing overview → Send for review)")
+        return ""
 
     @property
     def review_conflict(self):

@@ -247,3 +247,48 @@ def test_gms_auth_from_play_services_is_not_sign_in(tmp_path, kit, rsa_pem):
     rec, sha = rec_for(tmp_path, rsa_pem[0], dex=b"dex\n035\0Lcom/google/android/gms/auth/api/signin/GoogleSignIn;")
     bound_kit(kit, sha)
     assert "W-RESTORE" in ids(precheck.run(kit, rec, TODAY))
+
+
+def test_raw_size_over_mobile_data_point_warns_without_measuring(tmp_path, kit, rsa_pem):
+    rec, _ = rec_for(tmp_path, rsa_pem[0])
+    rec.size_bytes = 206 * 1024 * 1024
+    f = [x for x in precheck.run(kit, rec, TODAY) if x.id == "B-SIZE"]
+    assert f[0].severity == "WARNING" and "asset packs" in f[0].fix and "--size" in f[0].message
+
+
+def test_verification_mark_counts_as_evidence(tmp_path, kit, rsa_pem):
+    rec, _ = rec_for(tmp_path, rsa_pem[0])
+    assert "W-VERIFY" in ids(precheck.run(kit, rec, TODAY), "WARNING")
+    write(kit, "console-progress.yaml", {"steps": {"verification": {"state": "attested", "date": "2026-10-19"}}})
+    assert "W-VERIFY" in ids(precheck.run(kit, rec, TODAY), "INFO")
+    write(kit, "console-progress.yaml", {"steps": {"verification": {"state": "observed", "date": "2026-10-19",
+                                                                    "url": "https://play.google.com/console/u/4"}}})
+    assert "W-VERIFY" not in ids(precheck.run(kit, rec, TODAY))
+
+
+def test_testing_gate_from_the_dashboard_wins_over_the_date(tmp_path, kit, rsa_pem):
+    rec, _ = rec_for(tmp_path, rsa_pem[0])
+    facts = dict(GOOD_FACTS, account={"type": "personal", "created": None})
+    write(kit, "facts.yaml", facts)
+    assert "W-TESTING-GATE" not in ids(precheck.run(kit, rec, TODAY))
+    write(kit, "console.yaml", {"package": "com.example.app", "testing_gate_shown": True})
+    assert "W-TESTING-GATE" in ids(precheck.run(kit, rec, TODAY), "BLOCKER")
+    write(kit, "facts.yaml", dict(GOOD_FACTS, account={"type": "personal", "created": "2025-01-01"}))
+    write(kit, "console.yaml", {"package": "com.example.app", "testing_gate_shown": False})
+    assert "W-TESTING-GATE" not in ids(precheck.run(kit, rec, TODAY))
+
+
+def test_native_code_without_debug_symbols_is_info(tmp_path, kit, rsa_pem):
+    rec, _ = rec_for(tmp_path, rsa_pem[0], libs={"arm64-v8a/libfoo.so": [16384]})
+    f = [x for x in precheck.run(kit, rec, TODAY) if x.id == "N-SYMBOLS"]
+    assert f and f[0].severity == "INFO" and "SYMBOL_TABLE" in f[0].fix
+    rec.bundled_debug_symbols = True
+    assert "N-SYMBOLS" not in ids(precheck.run(kit, rec, TODAY))
+
+
+def test_precheck_json_lists_permission_forms_and_signer(tmp_path, kit, rsa_pem):
+    rec, sha = rec_for(tmp_path, rsa_pem[0], permissions=["android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+                                                          "com.android.vending.BILLING"])
+    s = precheck.summary(rec, precheck.run(kit, rec, TODAY), TODAY)
+    assert s["permission_declarations"] == ["Foreground service types declaration"]
+    assert s["signer_sha256"] == sha and s["billing"] is True

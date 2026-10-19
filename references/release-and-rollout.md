@@ -42,6 +42,12 @@ release.py status KIT    /    release.py wait KIT --version-code 42
 ```
 
 - `--status draft` (default) only needs G-UPLOAD: the release lands as a draft that a person finishes in the Console.
+- **A draft app takes only draft releases.** Until the app's first release is rolled out, `tracks.update` with any
+  other status fails with 400 "Only releases with status draft may be created on draft app". With
+  `console.yaml → app_state: draft` the plan refuses such a status before any request. The person then finishes the
+  release: Edit release → Next (Preview and confirm) → Save; until then Publishing overview keeps "Send app for review"
+  greyed out. After Send app for review, "Running quick checks" takes up to about 14 minutes and the changes then go
+  to review by themselves. `import --write-kit` switches `app_state` to `published` once a release is live.
   `completed` or `inProgress` adds G-TEST-DIST on testing tracks or G-PROD-SUBMIT on production.
 - Release notes: `releases/notes.yaml` maps language codes to text, at most 500 characters each (rule
   `release_notes.max_chars`). Notes add G-META-PUB, because under managed publishing they are not held.

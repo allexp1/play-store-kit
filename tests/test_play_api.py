@@ -204,3 +204,19 @@ def test_capabilities_403(status, body, field, value):
         return status, {}, json.dumps(body).encode()
     caps = play_api.capability_matrix(play_api.Client(None, transport, sleep=lambda s: None), "com.x")
     assert caps[field] == value
+
+
+def test_explain_maps_the_refusals_seen_on_a_real_draft_app():
+    from play_api import PlayError
+
+    def err(status, msg, path=""):
+        return PlayError(status, "", msg, "POST", path, {"error": {"message": msg}})
+
+    assert "merchant account" in err(403, "The caller does not have permission",
+                                     "applications/p/pricing:convertRegionPrices").explain()
+    assert "onetimeproducts" in err(403, "Please migrate to the new publishing API").explain()
+    assert "Edit and delete draft apps" in err(403, "The caller does not have permission",
+                                               "applications/p/edits/1:validate").explain()
+    assert "stage the release as draft" in err(400, "Only releases with status draft may be created on draft "
+                                                    "app.").explain()
+    assert err(404, "Edit not found.").explain() == ""
